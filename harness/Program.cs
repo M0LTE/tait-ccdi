@@ -8,11 +8,10 @@ var stopwatch = Stopwatch.StartNew();
 while (true)
 {
     double rawRssi = radio.GetRawRssi();
-    double forwardPower = radio.GetForwardPower();
-    double reversePower = radio.GetReversePower();
+    var swr = radio.GetVswr();
     double paTemp = radio.GetPaTemperature();
 
-    Console.WriteLine($"{stopwatch.ElapsedMilliseconds:000}ms   paTemp:{paTemp}C  rssi:{rawRssi:0.0}dBm   fwd:{forwardPower} rev:{reversePower}");
+    Console.WriteLine($"{stopwatch.ElapsedMilliseconds:000}ms   paTemp:{paTemp}C  rssi:{rawRssi:0.0}dBm   swr:{(swr == null ? "rx" : $"{swr:0.0}:1")}");
 
     stopwatch.Restart();
 }

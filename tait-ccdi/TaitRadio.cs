@@ -166,4 +166,23 @@ public class TaitRadio
         var result = value == null ? default : double.Parse(value.Value.Data);
         return result;
     }
+
+    /// <summary>
+    /// Get the VSWR from the forward and reverse power. Assumes a linear relationship between the ADC value and actual power.
+    /// </summary>
+    /// <returns></returns>
+    public double? GetVswr()
+    {
+        double forward = GetForwardPower();
+        if (forward < 200)
+        {
+            // probably in receive mode. We could use progress messages to detect.
+            return null;
+        }
+        double reverse = GetReversePower();
+        double top = 1 + Math.Sqrt(reverse / forward);
+        double bottom = 1 - Math.Sqrt(reverse / forward);
+        double result = top / bottom;
+        return result;
+    }
 }
