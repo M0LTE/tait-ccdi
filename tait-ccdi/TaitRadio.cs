@@ -168,7 +168,7 @@ public class TaitRadio
     }
 
     /// <summary>
-    /// Get the VSWR from the forward and reverse power. Assumes a linear relationship between the ADC value and actual power.
+    /// Get the VSWR from the forward and reverse power. Assumes a linear relationship between the ADC value and actual power. Seems to read quite high so this assumption might not be accurate.
     /// </summary>
     /// <returns></returns>
     public double? GetVswr()
