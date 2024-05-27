@@ -142,6 +142,7 @@ public record struct QueryResponse
     public string Command { get; set; }
     public string Data { get; set; }
     public string Checksum { get; set; }
+    public string RadioOutput { get; internal set; }
 
     public readonly string ToCommand() => $"{Ident}{Size:00}{Command}{Data}{Checksum}";
 }

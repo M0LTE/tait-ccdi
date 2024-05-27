@@ -64,4 +64,10 @@ public class CcdiCommandTests
             Debug.WriteLine($"{queryType}: {cmd}");
         }
     }
+
+    [Fact]
+    public void ValidateWeirdPaTemp() => CcdiChecksum.Validate("j06047469F2").Should().BeTrue();
+
+    [Fact]
+    public void ValidateNormalPaTemp() => CcdiChecksum.Validate("j05047282C").Should().BeTrue();
 }

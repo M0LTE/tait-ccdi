@@ -1,6 +1,6 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO.Ports;
-using System.Threading.Tasks.Dataflow;
 
 namespace tait_ccdi;
 
@@ -13,12 +13,10 @@ public class TaitRadio
         serialPort = new SerialPort(comPort, baud, Parity.None, 8, StopBits.One);
         serialPort.NewLine = "\r";
         serialPort.Open();
-        queryResponseBlock = new ActionBlock<QueryResponse>(response => OnRawRssiResponse?.Invoke(response));
         _ = Task.Run(RunRadio);
     }
 
-    private readonly ActionBlock<QueryResponse> queryResponseBlock;
-    public Action<QueryResponse>? OnRawRssiResponse { get; set; }
+    private readonly BlockingCollection<QueryResponse> responses = new(new ConcurrentQueue<QueryResponse>());
 
     private void RunRadio()
     {
@@ -28,7 +26,7 @@ public class TaitRadio
         {
             var i = serialPort.ReadByte();
 
-            if (i == -1)
+            if (i == -1 || i == 254)
             {
                 Console.WriteLine("Quitting");
                 return;
@@ -39,24 +37,27 @@ public class TaitRadio
             if (b == '.')
             {
                 // radio signals the end of a message with a period
-                var output = new string(buffer.ToArray());
+                var radioOutput = new string(buffer.ToArray());
                 buffer.Clear();
-                if (string.IsNullOrWhiteSpace(output))
+                if (string.IsNullOrWhiteSpace(radioOutput))
                 {
                     continue;
                 }
 
-                if (output.StartsWith('j') && CcdiCommand.TryParse(output, out var command))
+                if (radioOutput.StartsWith('j') && CcdiCommand.TryParse(radioOutput, out var command))
                 {
                     var response = command.AsQueryResponse();
-                    if (!queryResponseBlock.Post(response))
-                    {
-                        throw new InvalidOperationException();
-                    }
+                    response.RadioOutput = radioOutput;
+                    responses.Add(response);
                 }
-                else if (output.StartsWith('p'))
+                else if (radioOutput.StartsWith('p'))
                 {
                     // ignore progress messages
+                    continue;
+                }
+                else if (radioOutput.StartsWith('e'))
+                {
+                    // ignore error messages
                     continue;
                 }
                 else
@@ -80,8 +81,89 @@ public class TaitRadio
         }
     }
 
-    public void Send(string command)
+    private QueryResponse? WaitForResponse(char ident, string command, Func<string, bool>? validator = null)
     {
-        serialPort.WriteLine(command);
+        while (!responses.IsCompleted)
+        {
+            var response = responses.Take();
+
+            bool valid = validator == null || validator(response.Data);
+
+            if (response.Ident == ident)
+            {
+                if (response.Command == command)
+                {
+                    if (valid)
+                    {
+                        return response;
+                    }
+                }
+            }
+
+            if (valid)
+            {
+                // put it back for the next guy
+                responses.Add(response);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Raw received signal strength in dBm
+    /// </summary>
+    /// <returns></returns>
+    public double GetRawRssi()
+    {
+        serialPort.WriteLine(QueryCommands.Cctm_RawRssi);
+        var value = WaitForResponse('j', "064");
+        return value == null ? default : double.Parse(value.Value.Data) / 10.0;
+    }
+
+    /// <summary>
+    /// Averaged received signal strength in dBm
+    /// Period unknown
+    /// </summary>
+    /// <returns></returns>
+    public double GetAveragedRssi()
+    {
+        serialPort.WriteLine(QueryCommands.Cctm_AveragedRssi);
+        var value = WaitForResponse('j', "063");
+        return value == null ? default : double.Parse(value.Value.Data) / 10.0;
+    }
+
+    /// <summary>
+    /// Forward power in ADC value out of 3000
+    /// </summary>
+    /// <returns></returns>
+    public int GetForwardPower()
+    {
+        serialPort.WriteLine(QueryCommands.Cctm_ForwardPower);
+        var value = WaitForResponse('j', "318");
+        return value == null ? default : int.Parse(value.Value.Data);
+    }
+
+    /// <summary>
+    /// Reverse power in ADC value out of 3000
+    /// </summary>
+    /// <returns></returns>
+    public double GetReversePower()
+    {
+        serialPort.WriteLine(QueryCommands.Cctm_ReversePower);
+        var value = WaitForResponse('j', "319");
+        return value == null ? default : int.Parse(value.Value.Data);
+    }
+
+    /// <summary>
+    /// PA temperature in degrees C
+    /// </summary>
+    /// <returns></returns>
+    public double GetPaTemperature()
+    {
+        serialPort.WriteLine(QueryCommands.Cctm_PaTemperature);
+        var value = WaitForResponse('j', "047", result => double.TryParse(result, out var i) && i < 400);
+        var result = value == null ? default : double.Parse(value.Value.Data);
+        return result;
     }
 }
