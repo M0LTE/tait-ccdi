@@ -186,6 +186,12 @@ public class ProgressMessageEventArgs(ProgressMessage message) : EventArgs
     public ProgressMessage ProgressMessage { get; } = message;
 }
 
+public class StateChangedEventArgs(RadioState from, RadioState to) : EventArgs
+{
+    public RadioState From { get; } = from;
+    public RadioState To { get; } = to;
+}
+
 public enum ProgressType
 {
     CallAnswered = 0x00,

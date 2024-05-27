@@ -21,6 +21,7 @@ public class TaitRadio
     private readonly BlockingCollection<QueryResponse> queryResponses = new(new ConcurrentQueue<QueryResponse>());
 
     public event EventHandler<ProgressMessageEventArgs>? ProgressMessageReceived;
+    public event EventHandler<StateChangedEventArgs>? StateChanged;
 
     private void RunRadio()
     {
@@ -88,6 +89,8 @@ public class TaitRadio
 
     private void HandleProgressMessage(ProgressMessage progressMessage)
     {
+        var oldState = State;
+
         if (progressMessage.ProgressType == ProgressType.ReceiverBusy)
         {
             State = RadioState.HearingSignal;
@@ -103,6 +106,11 @@ public class TaitRadio
         else if (progressMessage.ProgressType == ProgressType.PttMicDeactivated)
         {
             State = RadioState.HearingNoise;
+        }
+
+        if (oldState != State)
+        {
+            StateChanged?.Invoke(this, new StateChangedEventArgs(oldState, State));
         }
 
         ProgressMessageReceived?.Invoke(this, new ProgressMessageEventArgs(progressMessage));
@@ -186,7 +194,7 @@ public class TaitRadio
     public double GetPaTemperature()
     {
         serialPort.WriteLine(QueryCommands.Cctm_PaTemperature);
-        var value = WaitForQueryResponse("047", result => double.TryParse(result, out var i) && i < 400);
+        var value = WaitForQueryResponse("047", result => double.TryParse(result, out var i) && i < 100);
         var result = value == null ? default : double.Parse(value.Value.Data);
         return result;
     }

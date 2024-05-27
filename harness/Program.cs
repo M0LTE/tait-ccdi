@@ -1,14 +1,11 @@
-﻿using System.Diagnostics;
+﻿using MathNet.Numerics.Statistics;
+using System.Diagnostics;
 using tait_ccdi;
-using MathNet.Numerics.Statistics;
 
 var radio = new TaitRadio("COM3", 28800);
-radio.ProgressMessageReceived += (sender, args) =>
+radio.StateChanged += (sender, args) =>
 {
-    if (args.ProgressMessage.ProgressType != ProgressType.FfskDataReceived)
-    {
-        Console.WriteLine(args.ProgressMessage);
-    }
+    Console.WriteLine($"Radio state transition {args.From} --> {args.To}");
 };
 
 var stopwatch = Stopwatch.StartNew();
@@ -20,8 +17,14 @@ while (true)
     if (radio.State == RadioState.Transmitting)
     {
         var vswr = radio.GetVswr();
-        var paTemp = radio.GetPaTemperature();
-        Console.WriteLine($"{stopwatch.ElapsedMilliseconds:000}ms   vswr:{vswr:0.0}:1   paTemp:{paTemp}C");
+        if (vswr.HasValue)
+        {
+            var paTemp = radio.GetPaTemperature();
+            if (radio.State == RadioState.Transmitting)
+            {
+                Console.WriteLine($"{stopwatch.ElapsedMilliseconds:000}ms   vswr:{vswr:0.0}:1   paTemp:{paTemp}C");
+            }
+        }
     }
     else
     {
