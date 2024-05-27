@@ -1,4 +1,5 @@
 ﻿using FluentAssertions;
+using System.Diagnostics;
 using tait_ccdi;
 
 namespace tests;
@@ -51,5 +52,16 @@ public class CcdiCommandTests
         var queryResults = ccdiCommand.AsQueryResponse();
         queryResults.Command.Should().Be("047");
         queryResults.Data.Should().Be("481");
+    }
+
+    [Fact]
+    public void GenerateAllCommands()
+    {
+        foreach (var queryType in Enum.GetValues<QueryType>())
+        {
+            QueryCommand queryCommand = new(queryType);
+            string cmd = queryCommand.ToCommand();
+            Debug.WriteLine($"{queryType}: {cmd}");
+        }
     }
 }

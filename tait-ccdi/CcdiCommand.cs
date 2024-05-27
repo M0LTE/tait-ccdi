@@ -33,21 +33,88 @@ public record struct CcdiCommand
     public const int Terminator = 0x0d;
 }
 
+/// <summary>
+/// While we can construct each command every time, the values are always the same, so there is no need.
+/// </summary>
+public static class QueryCommands
+{
+    public const string ModelAndCcdiVersion = "q010FE";
+    public const string QuerySdm = "q011FD";
+    public const string Version = "q013FB";
+    public const string SerialNumber = "q014FA";
+    public const string Cctm_PaTemperature = "q0450475B";
+    public const string Cctm_AveragedRssi = "q0450635D";
+    public const string Cctm_RawRssi = "q0450645C";
+    public const string Cctm_ForwardPower = "q0453185A";
+    public const string Cctm_ReversePower = "q04531959";
+    public const string Gps = "q016F8";
+    public const string Display = "q0270C6";
+}
+
 public record struct QueryCommand
 {
     public QueryCommand(QueryType queryType) : this()
     {
+        Ident = 'q';
+
         if (queryType == QueryType.Cctm_RawRssi)
         {
-            Ident = 'q';
             Command = "5";
             Data = "064";
         }
         else if (queryType == QueryType.Cctm_AveragedRssi)
         {
-            Ident = 'q';
             Command = "5";
             Data = "063";
+        }
+        else if (queryType == QueryType.Cctm_PaTemperature)
+        {
+            Command = "5";
+            Data = "047";
+        }
+        else if (queryType == QueryType.Cctm_ForwardPower)
+        {
+            Command = "5";
+            Data = "318";
+        }
+        else if (queryType == QueryType.Cctm_ReversePower)
+        {
+            Command = "5";
+            Data = "319";
+        }
+        else if (queryType == QueryType.ModelAndCcdiVersion)
+        {
+            Command = "0";
+            Data = "";
+            // returns a MODEL message
+        }
+        else if (queryType == QueryType.QuerySdm)
+        {
+            Command = "1";
+            Data = "";
+            // returns a GET_SDM message
+        }
+        else if (queryType == QueryType.Version)
+        {
+            Command = "3";
+            Data = "";
+            // returns a RADIO_VERSION message
+        }
+        else if (queryType == QueryType.SerialNumber)
+        {
+            Command = "4";
+            Data = "";
+            // returns a RADIO_SERIAL message
+        }
+        else if (queryType == QueryType.Gps)
+        {
+            Command = "6";
+            Data = "";
+        }
+        else if (queryType == QueryType.Display)
+        {
+            Command = "7";
+            Data = "0";
         }
         else
         {
@@ -102,6 +169,16 @@ public enum QueryType
     Cctm_RawRssi,
     Cctm_ForwardPower,
     Cctm_ReversePower,
+    /// <summary>
+    /// Query GPS. GPS data is returned packetised as though the TM8100/TM8200 is a polling radio.
+    /// TM8100: from v2.10
+    /// TM8200: No
+    /// </summary>
     Gps,
+    /// <summary>
+    /// Returns the text of the entire display. Non-ASCII text is ignored.
+    /// TM8100: No
+    /// TM8200: from v3.03
+    /// </summary>
     Display
 }

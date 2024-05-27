@@ -1,6 +1,6 @@
 ﻿using System.Diagnostics;
 using System.IO.Ports;
-using System.Text;
+using System.Threading.Tasks.Dataflow;
 
 namespace tait_ccdi;
 
@@ -13,9 +13,12 @@ public class TaitRadio
         serialPort = new SerialPort(comPort, baud, Parity.None, 8, StopBits.One);
         serialPort.NewLine = "\r";
         serialPort.Open();
-
+        queryResponseBlock = new ActionBlock<QueryResponse>(response => OnRawRssiResponse?.Invoke(response));
         _ = Task.Run(RunRadio);
     }
+
+    private readonly ActionBlock<QueryResponse> queryResponseBlock;
+    public Action<QueryResponse>? OnRawRssiResponse { get; set; }
 
     private void RunRadio()
     {
@@ -35,30 +38,25 @@ public class TaitRadio
 
             if (b == '.')
             {
-                var sb = new StringBuilder();
-                sb.Append(buffer.ToArray());
-                var output = sb.ToString();
+                // radio signals the end of a message with a period
+                var output = new string(buffer.ToArray());
                 buffer.Clear();
                 if (string.IsNullOrWhiteSpace(output))
                 {
                     continue;
                 }
 
-                if (output.StartsWith("j") && CcdiCommand.TryParse(output, out var command))
+                if (output.StartsWith('j') && CcdiCommand.TryParse(output, out var command))
                 {
                     var response = command.AsQueryResponse();
-
-                    if (response.Command == "064")
+                    if (!queryResponseBlock.Post(response))
                     {
-                        rawRssi = int.Parse(response.Data) / 10.0;
-                    }
-                    else if (response.Command == "063")
-                    {
-                        averagedRssi = int.Parse(response.Data) / 10.0;
+                        throw new InvalidOperationException();
                     }
                 }
-                else if (output.StartsWith("p"))
+                else if (output.StartsWith('p'))
                 {
+                    // ignore progress messages
                     continue;
                 }
                 else
@@ -70,46 +68,20 @@ public class TaitRadio
             {
                 if (b >= 33 && b <= 126)
                 {
+                    // write printable ascii to the buffer
                     buffer.Add((char)b);
                 }
-                else if (b != 13)
+                else if (b != 13) // radio sends CRs but we don't care
                 {
+                    // something we didn't anticipate
                     Debugger.Break();
                 }
             }
         }
     }
 
-    double? rawRssi;
-    double? averagedRssi;
-
-    public async Task<double> GetRawRssi()
+    public void Send(string command)
     {
-        var command = new QueryCommand(QueryType.Cctm_RawRssi);
-        var cmd = command.ToCommand();
-        serialPort.WriteLine(cmd);
-
-        while (rawRssi == null)
-        {
-            await Task.Delay(1);
-        }
-        double val = rawRssi.Value;
-        rawRssi = null;
-        return val;
-    }
-
-    public async Task<double> GetAveragedRssi()
-    {
-        var command = new QueryCommand(QueryType.Cctm_AveragedRssi);
-        var cmd = command.ToCommand();
-        serialPort.WriteLine(cmd);
-
-        while (averagedRssi == null)
-        {
-            await Task.Delay(1);
-        }
-        double val = averagedRssi.Value;
-        averagedRssi = null;
-        return val;
+        serialPort.WriteLine(command);
     }
 }

@@ -1,20 +1,17 @@
 ﻿using System.Diagnostics;
-using System.Text;
 using tait_ccdi;
 
 var radio = new TaitRadio("COM3", 115200);
 
-//Console.WriteLine("Press enter to queue command");
+var stopwatch = Stopwatch.StartNew();
 
-var sw = Stopwatch.StartNew();
-var sb = new StringBuilder();
-while (sw.ElapsedMilliseconds < 15000)
+radio.OnRawRssiResponse = response =>
 {
-    //Console.ReadLine();
-    var rssi = await radio.GetRawRssi();
-    //Console.SetCursorPosition(0, 0);
-    //Console.WriteLine(rssi);
-    sb.AppendLine($"{DateTime.Now.ToString("HH:mm:ss.fff")},{rssi}");
-}
+    Console.WriteLine($"{1000/stopwatch.ElapsedMilliseconds:0}Hz   Data: {response.Data}");
+    stopwatch.Restart();
+    radio.Send(QueryCommands.Cctm_RawRssi);
+};
 
-File.WriteAllText("C:\\Users\\me\\Desktop\\rssi.csv", sb.ToString());
+radio.Send(QueryCommands.Cctm_RawRssi);
+
+Thread.CurrentThread.Join();
