@@ -6,6 +6,8 @@ namespace tait_ccdi;
 
 public class TaitRadio
 {
+    public RadioState State { get; private set; }
+
     private readonly SerialPort serialPort;
 
     public TaitRadio(string comPort, int baud)
@@ -56,7 +58,7 @@ public class TaitRadio
                 {
                     var progressMessage = progressCommand.AsProgressMessage();
                     progressMessage.RadioOutput = radioOutput;
-                    ProgressMessageReceived?.Invoke(this, new ProgressMessageEventArgs(progressMessage));
+                    HandleProgressMessage(progressMessage);
                 }
                 else if (radioOutput.StartsWith('e'))
                 {
@@ -82,6 +84,28 @@ public class TaitRadio
                 }
             }
         }
+    }
+
+    private void HandleProgressMessage(ProgressMessage progressMessage)
+    {
+        if (progressMessage.ProgressType == ProgressType.ReceiverBusy)
+        {
+            State = RadioState.HearingSignal;
+        }
+        else if (progressMessage.ProgressType == ProgressType.ReceiverNotBusy)
+        {
+            State = RadioState.HearingNoise;
+        }
+        else if (progressMessage.ProgressType == ProgressType.PttMicActivated)
+        {
+            State = RadioState.Transmitting;
+        }
+        else if (progressMessage.ProgressType == ProgressType.PttMicDeactivated)
+        {
+            State = RadioState.HearingNoise;
+        }
+
+        ProgressMessageReceived?.Invoke(this, new ProgressMessageEventArgs(progressMessage));
     }
 
     private QueryResponse? WaitForQueryResponse(string command, Func<string, bool>? validator = null)
@@ -134,10 +158,10 @@ public class TaitRadio
     }
 
     /// <summary>
-    /// Forward power in ADC value out of 3000
+    /// Forward power in mV, from 0 to 1200mV
     /// </summary>
     /// <returns></returns>
-    public int GetForwardPower()
+    public int GetForwardVoltage()
     {
         serialPort.WriteLine(QueryCommands.Cctm_ForwardPower);
         var value = WaitForQueryResponse("318");
@@ -145,10 +169,10 @@ public class TaitRadio
     }
 
     /// <summary>
-    /// Reverse power in ADC value out of 3000
+    /// Reverse power in mV, from 0 to 1200mV
     /// </summary>
     /// <returns></returns>
-    public double GetReversePower()
+    public double GetReverseVoltage()
     {
         serialPort.WriteLine(QueryCommands.Cctm_ReversePower);
         var value = WaitForQueryResponse("319");
@@ -168,21 +192,26 @@ public class TaitRadio
     }
 
     /// <summary>
-    /// Get the VSWR from the forward and reverse power. Assumes a linear relationship between the ADC value and actual power. Seems to read quite high so this assumption might not be accurate.
+    /// Get the VSWR from the forward and reverse voltage.
     /// </summary>
     /// <returns></returns>
     public double? GetVswr()
     {
-        double forward = GetForwardPower();
-        if (forward < 200)
+        if (State != RadioState.Transmitting)
         {
-            // probably in receive mode. We could use progress messages to detect.
-            return null;
+            return default;
         }
-        double reverse = GetReversePower();
-        double top = 1 + Math.Sqrt(reverse / forward);
-        double bottom = 1 - Math.Sqrt(reverse / forward);
+
+        double forward = GetForwardVoltage();
+        double reverse = GetReverseVoltage();
+        double top = forward + reverse;
+        double bottom = forward - reverse;
         double result = top / bottom;
         return result;
     }
+}
+
+public enum RadioState
+{
+    HearingNoise, HearingSignal, Transmitting
 }

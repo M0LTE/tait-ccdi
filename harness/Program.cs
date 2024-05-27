@@ -2,31 +2,12 @@
 using tait_ccdi;
 using MathNet.Numerics.Statistics;
 
-RadioState state = default;
-
 var radio = new TaitRadio("COM3", 28800);
 radio.ProgressMessageReceived += (sender, args) =>
 {
     if (args.ProgressMessage.ProgressType != ProgressType.FfskDataReceived)
     {
         Console.WriteLine(args.ProgressMessage);
-    }
-
-    if (args.ProgressMessage.ProgressType == ProgressType.ReceiverBusy)
-    {
-        state = RadioState.HearingSignal;
-    }
-    else if (args.ProgressMessage.ProgressType == ProgressType.ReceiverNotBusy)
-    {
-        state = RadioState.HearingNoise;
-    }
-    else if (args.ProgressMessage.ProgressType == ProgressType.PttMicActivated)
-    {
-        state = RadioState.Transmitting;
-    }
-    else if (args.ProgressMessage.ProgressType == ProgressType.PttMicDeactivated)
-    {
-        state = RadioState.HearingNoise;
     }
 };
 
@@ -36,7 +17,7 @@ var nf = new List<double>();
 
 while (true)
 {
-    if (state == RadioState.Transmitting)
+    if (radio.State == RadioState.Transmitting)
     {
         var vswr = radio.GetVswr();
         var paTemp = radio.GetPaTemperature();
@@ -45,7 +26,7 @@ while (true)
     else
     {
         double rawRssi = radio.GetRawRssi();
-        if (state == RadioState.HearingSignal)
+        if (radio.State == RadioState.HearingSignal)
         {
             var averageNoiseFloor = nf.Median();
             Console.WriteLine($"{stopwatch.ElapsedMilliseconds:000}ms   rssi:{rawRssi:0.0}dBm   nf:{averageNoiseFloor:0.0}dBm   snr:{rawRssi - averageNoiseFloor:0.0}dB");
@@ -62,9 +43,4 @@ while (true)
     }
 
     stopwatch.Restart();
-}
-
-enum RadioState
-{
-    HearingNoise, HearingSignal, Transmitting
 }
