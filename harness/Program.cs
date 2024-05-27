@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using tait_ccdi;
+using MathNet.Numerics.Statistics;
 
 RadioState state = default;
 
@@ -46,7 +47,7 @@ while (true)
         double rawRssi = radio.GetRawRssi();
         if (state == RadioState.HearingSignal)
         {
-            var averageNoiseFloor = nf.Average();
+            var averageNoiseFloor = nf.Median();
             Console.WriteLine($"{stopwatch.ElapsedMilliseconds:000}ms   rssi:{rawRssi:0.0}dBm   nf:{averageNoiseFloor:0.0}dBm   snr:{rawRssi - averageNoiseFloor:0.0}dB");
         }
         else
