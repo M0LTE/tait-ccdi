@@ -6,7 +6,7 @@ namespace tait_ccdi;
 
 public class TaitRadio
 {
-    private SerialPort serialPort;
+    private readonly SerialPort serialPort;
 
     public TaitRadio(string comPort, int baud)
     {
@@ -16,7 +16,9 @@ public class TaitRadio
         _ = Task.Run(RunRadio);
     }
 
-    private readonly BlockingCollection<QueryResponse> responses = new(new ConcurrentQueue<QueryResponse>());
+    private readonly BlockingCollection<QueryResponse> queryResponses = new(new ConcurrentQueue<QueryResponse>());
+
+    public event EventHandler<ProgressMessageEventArgs>? ProgressMessageReceived;
 
     private void RunRadio()
     {
@@ -44,16 +46,17 @@ public class TaitRadio
                     continue;
                 }
 
-                if (radioOutput.StartsWith('j') && CcdiCommand.TryParse(radioOutput, out var command))
+                if (radioOutput.StartsWith('j') && CcdiCommand.TryParse(radioOutput, out var queryResponseCommand))
                 {
-                    var response = command.AsQueryResponse();
-                    response.RadioOutput = radioOutput;
-                    responses.Add(response);
+                    var queryResponse = queryResponseCommand.AsQueryResponse();
+                    queryResponse.RadioOutput = radioOutput;
+                    queryResponses.Add(queryResponse);
                 }
-                else if (radioOutput.StartsWith('p'))
+                else if (radioOutput.StartsWith('p') && CcdiCommand.TryParse(radioOutput, out var progressCommand))
                 {
-                    // ignore progress messages
-                    continue;
+                    var progressMessage = progressCommand.AsProgressMessage();
+                    progressMessage.RadioOutput = radioOutput;
+                    ProgressMessageReceived?.Invoke(this, new ProgressMessageEventArgs(progressMessage));
                 }
                 else if (radioOutput.StartsWith('e'))
                 {
@@ -81,29 +84,26 @@ public class TaitRadio
         }
     }
 
-    private QueryResponse? WaitForResponse(char ident, string command, Func<string, bool>? validator = null)
+    private QueryResponse? WaitForQueryResponse(string command, Func<string, bool>? validator = null)
     {
-        while (!responses.IsCompleted)
+        while (!queryResponses.IsCompleted)
         {
-            var response = responses.Take();
+            var response = queryResponses.Take();
 
             bool valid = validator == null || validator(response.Data);
 
-            if (response.Ident == ident)
+            if (response.Command == command)
             {
-                if (response.Command == command)
+                if (valid)
                 {
-                    if (valid)
-                    {
-                        return response;
-                    }
+                    return response;
                 }
             }
 
             if (valid)
             {
                 // put it back for the next guy
-                responses.Add(response);
+                queryResponses.Add(response);
             }
         }
 
@@ -117,7 +117,7 @@ public class TaitRadio
     public double GetRawRssi()
     {
         serialPort.WriteLine(QueryCommands.Cctm_RawRssi);
-        var value = WaitForResponse('j', "064");
+        var value = WaitForQueryResponse("064");
         return value == null ? default : double.Parse(value.Value.Data) / 10.0;
     }
 
@@ -129,7 +129,7 @@ public class TaitRadio
     public double GetAveragedRssi()
     {
         serialPort.WriteLine(QueryCommands.Cctm_AveragedRssi);
-        var value = WaitForResponse('j', "063");
+        var value = WaitForQueryResponse("063");
         return value == null ? default : double.Parse(value.Value.Data) / 10.0;
     }
 
@@ -140,7 +140,7 @@ public class TaitRadio
     public int GetForwardPower()
     {
         serialPort.WriteLine(QueryCommands.Cctm_ForwardPower);
-        var value = WaitForResponse('j', "318");
+        var value = WaitForQueryResponse("318");
         return value == null ? default : int.Parse(value.Value.Data);
     }
 
@@ -151,7 +151,7 @@ public class TaitRadio
     public double GetReversePower()
     {
         serialPort.WriteLine(QueryCommands.Cctm_ReversePower);
-        var value = WaitForResponse('j', "319");
+        var value = WaitForQueryResponse("319");
         return value == null ? default : int.Parse(value.Value.Data);
     }
 
@@ -162,7 +162,7 @@ public class TaitRadio
     public double GetPaTemperature()
     {
         serialPort.WriteLine(QueryCommands.Cctm_PaTemperature);
-        var value = WaitForResponse('j', "047", result => double.TryParse(result, out var i) && i < 400);
+        var value = WaitForQueryResponse("047", result => double.TryParse(result, out var i) && i < 400);
         var result = value == null ? default : double.Parse(value.Value.Data);
         return result;
     }

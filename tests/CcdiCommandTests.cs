@@ -70,4 +70,96 @@ public class CcdiCommandTests
 
     [Fact]
     public void ValidateNormalPaTemp() => CcdiChecksum.Validate("j05047282C").Should().BeTrue();
+
+    [Fact]
+    public void Progress()
+    {
+        CcdiCommand.TryParse("p0205C9", out var command).Should().BeTrue();
+        var progressMessage = command.AsProgressMessage();
+        progressMessage.ProgressType.Should().Be(ProgressType.ReceiverBusy);
+        progressMessage.Checksum.Should().Be("C9");
+        progressMessage.Size.Should().Be(2);
+        progressMessage.Para1.Should().BeNull();
+        progressMessage.Para2.Should().BeNull();
+    }
+
+    [Fact]
+    public void InhibitExample()
+    {
+        CcdiCommand.TryParse("p0202CC", out var command).Should().BeTrue();
+        var progressMessage = command.AsProgressMessage();
+        progressMessage.ProgressType.Should().Be(ProgressType.TxInhibited);
+        progressMessage.Checksum.Should().Be("CC");
+        progressMessage.Size.Should().Be(2);
+        progressMessage.Para1.Should().BeNull();
+        progressMessage.Para2.Should().BeNull();
+    }
+
+    [Fact]
+    public void PType21()
+    {
+        var command = CcdiCommand.FromParts('p', "21" + "9" + "01" + "2345");
+        var progressMessage = command.AsProgressMessage();
+        progressMessage.ProgressType.Should().Be(ProgressType.UserInitiatedChannelChange);
+        progressMessage.Checksum.Should().Be("5C");
+        progressMessage.Size.Should().Be(9);
+        progressMessage.Para1.Should().Be("9");
+        progressMessage.Para2.Should().Be("012345");
+    }
+
+    [Fact]
+    public void PType22()
+    {
+        var command = CcdiCommand.FromParts('p', "22" + "EF" + "0D");
+        var progressMessage = command.AsProgressMessage();
+        progressMessage.ProgressType.Should().Be(ProgressType.TdmaChannelId);
+        progressMessage.Checksum.Should().Be("C7");
+        progressMessage.Size.Should().Be(6);
+        progressMessage.Para1.Should().Be("EF");
+        progressMessage.Para2.Should().Be("0D");
+    }
+
+    [Theory]
+    [InlineData(ProgressType.SelcallAutoAcknowledge, "1", "88")]
+    [InlineData(ProgressType.SdmAutoAcknowledge, "1", "87")]
+    [InlineData(ProgressType.SdmGpsDataReceived, "1", "86")]
+    [InlineData(ProgressType.RadioRestarted, "1", "85")]
+    [InlineData(ProgressType.RadioRestarted, "3", "83")]
+    public void PType1C_D_E_F(ProgressType progressType, string para1, string sum)
+    {
+        var ptype = Convert.ToHexString(new[] { (byte)progressType });
+        var command = CcdiCommand.FromParts('p', ptype + para1);
+        var progressMessage = command.AsProgressMessage();
+        progressMessage.ProgressType.Should().Be(progressType);
+        progressMessage.Checksum.Should().Be(sum);
+        progressMessage.Size.Should().Be((ptype + para1).Length);
+        progressMessage.Para1.Should().Be(para1);
+        progressMessage.Para2.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(ProgressType.CallAnswered, "CE")]
+    [InlineData(ProgressType.DeferredCalling, "CD")]
+    [InlineData(ProgressType.TxInhibited, "CC")]
+    [InlineData(ProgressType.EmergencyModeInitiated, "CB")]
+    [InlineData(ProgressType.EmergencyModeTerminated, "CA")]
+    [InlineData(ProgressType.ReceiverBusy, "C9")]
+    [InlineData(ProgressType.ReceiverNotBusy, "C8")]
+    [InlineData(ProgressType.PttMicActivated, "C7")]
+    [InlineData(ProgressType.PttMicDeactivated, "C6")]
+    [InlineData(ProgressType.SelcallRetry, "C7") ]
+    [InlineData(ProgressType.RadioStunned, "C6")]
+    [InlineData(ProgressType.RadioRevived, "C5")]
+    [InlineData(ProgressType.FfskDataReceived, "C4")]
+    [InlineData(ProgressType.SingleInBandToneReceived, "CC")]
+    public void OtherPtypes(ProgressType progressType, string sum)
+    {
+        var command = CcdiCommand.FromParts('p', Convert.ToHexString(new[] { (byte)progressType }));
+        var progressMessage = command.AsProgressMessage();
+        progressMessage.ProgressType.Should().Be(progressType);
+        progressMessage.Checksum.Should().Be(sum);
+        progressMessage.Size.Should().Be(2);
+        progressMessage.Para1.Should().BeNull();
+        progressMessage.Para2.Should().BeNull();
+    }
 }
