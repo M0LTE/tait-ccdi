@@ -25,6 +25,17 @@ public class TaitRadio
     public event EventHandler<RssiEventArgs>? RawRssiUpdated;
     public event EventHandler<VswrEventArgs>? VswrChanged;
 
+    public async Task Run()
+    {
+        while (!done)
+        {
+            await Task.Delay(1000);
+        }
+    }
+
+
+    bool done;
+    
     private void RunRadio()
     {
         List<char> buffer = [];
@@ -35,7 +46,7 @@ public class TaitRadio
 
             if (i == -1 || i == 254)
             {
-                Console.WriteLine("Quitting");
+                done = true;
                 return;
             }
 
