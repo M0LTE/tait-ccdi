@@ -22,6 +22,8 @@ public class TaitRadio
 
     public event EventHandler<ProgressMessageEventArgs>? ProgressMessageReceived;
     public event EventHandler<StateChangedEventArgs>? StateChanged;
+    public event EventHandler<RssiEventArgs>? RawRssiUpdated;
+    public event EventHandler<VswrEventArgs>? VswrChanged;
 
     private void RunRadio()
     {
@@ -81,7 +83,7 @@ public class TaitRadio
                 else if (b != 13) // radio sends CRs but we don't care
                 {
                     // something we didn't anticipate
-                    Debugger.Break();
+                    //Debugger.Break();
                 }
             }
         }
@@ -111,9 +113,36 @@ public class TaitRadio
         if (oldState != State)
         {
             StateChanged?.Invoke(this, new StateChangedEventArgs(oldState, State));
+            if (State == RadioState.Transmitting)
+            {
+                StartGetVswr();
+            }
+            else if (oldState == RadioState.Transmitting && State != RadioState.Transmitting)
+            {
+                stopGettingVswr = true;
+            }
         }
 
         ProgressMessageReceived?.Invoke(this, new ProgressMessageEventArgs(progressMessage));
+    }
+
+    bool stopGettingVswr;
+
+    private void StartGetVswr()
+    {
+        _ = Task.Run(() =>
+        {
+            while (!stopGettingVswr)
+            {
+                var vswr = GetVswr();
+                if (vswr != null && vswr > 1)
+                {
+                    VswrChanged?.Invoke(this, new(vswr.Value));
+                }
+            }
+
+            stopGettingVswr = false;
+        });
     }
 
     private QueryResponse? WaitForQueryResponse(string command, Func<string, bool>? validator = null)
@@ -216,6 +245,18 @@ public class TaitRadio
         double bottom = forward - reverse;
         double result = top / bottom;
         return result;
+    }
+
+    public void StartGetRawRssi()
+    {
+        _ = Task.Run(() =>
+        {
+            while (true)
+            {
+                var rssi = GetRawRssi();
+                RawRssiUpdated?.Invoke(this, new RssiEventArgs(rssi));
+            }
+        });
     }
 }
 

@@ -192,6 +192,16 @@ public class StateChangedEventArgs(RadioState from, RadioState to) : EventArgs
     public RadioState To { get; } = to;
 }
 
+public class RssiEventArgs(double rssi) : EventArgs
+{
+    public double Rssi { get; } = rssi;
+}
+
+public class VswrEventArgs(double vswr) : EventArgs
+{
+    public double Vswr { get; } = vswr;
+}
+
 public enum ProgressType
 {
     CallAnswered = 0x00,
