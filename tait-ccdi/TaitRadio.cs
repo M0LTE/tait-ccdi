@@ -4,6 +4,8 @@ using System.IO.Ports;
 
 namespace tait_ccdi;
 
+// see https://wiki.oarc.uk/_media/radios:tm8100-protocol-manual.pdf
+
 public class TaitRadio
 {
     public TaitRadio(string comPort, int baud, ILogger logger)
@@ -102,7 +104,8 @@ public class TaitRadio
 
             if (output.StartsWith(".m"))
             {
-                serialPort.ReadExisting();
+                var existing = serialPort.ReadExisting();
+                logger.LogInformation("Got additional data: '{existing}'", existing);
                 result = output[1..];
                 return true;
             }
@@ -130,27 +133,55 @@ public class TaitRadio
         {
             if (State == RadioState.ReceivingNoise || State == RadioState.ReceivingSignal)
             {
-                serialPort.WriteLine(QueryCommands.Cctm_RawRssi);
-                ExpectQueryResponse(rawRssiQueryResponseCode, within);
+                WaitUntilReady();
+                lock (serialPort)
+                {
+                    isReady = false;
+                    serialPort.WriteLine(QueryCommands.Cctm_RawRssi);
+                    ExpectQueryResponse(rawRssiQueryResponseCode, within);
+                }
             }
             else if (State == RadioState.Transmitting)
             {
                 if (!swrLastQueried.IsRunning || swrLastQueried.Elapsed > TimeSpan.FromSeconds(0.25))
                 {
-                    serialPort.WriteLine(QueryCommands.Cctm_ForwardPower);
-                    ExpectQueryResponse(forwardPowerQueryResponseCode, within);
-                    serialPort.WriteLine(QueryCommands.Cctm_ReversePower);
-                    ExpectQueryResponse(reversePowerQueryResponseCode, within);
+                    WaitUntilReady();
+                    lock (serialPort)
+                    {
+                        isReady = false;
+                        serialPort.WriteLine(QueryCommands.Cctm_ForwardPower);
+                        ExpectQueryResponse(forwardPowerQueryResponseCode, within);
+                    }
+                    WaitUntilReady();
+                    lock (serialPort)
+                    {
+                        isReady = false;
+                        serialPort.WriteLine(QueryCommands.Cctm_ReversePower);
+                        ExpectQueryResponse(reversePowerQueryResponseCode, within);
+                    }
                     swrLastQueried.Restart();
                 }
             }
 
             if (!paTempLastQueried.IsRunning || paTempLastQueried.Elapsed > TimeSpan.FromSeconds(10))
             {
-                serialPort.WriteLine(QueryCommands.Cctm_PaTemperature);
-                ExpectQueryResponse(paTempQueryResponseCode, within);
+                WaitUntilReady();
+                lock (serialPort)
+                {
+                    isReady = false;
+                    serialPort.WriteLine(QueryCommands.Cctm_PaTemperature);
+                    ExpectQueryResponse(paTempQueryResponseCode, within);
+                }
                 paTempLastQueried.Restart();
             }
+        }
+    }
+
+    private void WaitUntilReady()
+    {
+        while (!isReady)
+        {
+            Thread.Sleep(5);
         }
     }
 
@@ -185,13 +216,14 @@ public class TaitRadio
                 }
                 else
                 {
-                    logger.LogInformation("Binning unexpected response {responseCode}, waiting...", queryResponse.Command);
+                    logger.LogInformation("Unexpected response {responseCode}, waiting...", queryResponse.Command);
                     Thread.Sleep(10);
                     continue;
                 }
             }
         }
 
+        logger.LogWarning("Timed out waiting for response {responseCode}", responseCode);
         return false;
     }
 
@@ -221,6 +253,7 @@ public class TaitRadio
     }
 
     double lastFwdPower;
+    bool isReady;
 
     private void HandleDataFromRadio(SerialPort serialPort, CancellationTokenSource tokenSource)
     { 
@@ -228,7 +261,7 @@ public class TaitRadio
 
         while (!tokenSource.IsCancellationRequested)
         {
-            if (!serialPort.TryReadTo("\r.", out var radioOutput, TimeSpan.FromSeconds(10)))
+            if (!serialPort.TryReadTo("\r", out var radioOutput, TimeSpan.FromSeconds(10)))
             {
                 if (TryDetectTait(serialPort, out _))
                 {
@@ -252,6 +285,7 @@ public class TaitRadio
             while (radioOutput.StartsWith('.'))
             {
                 radioOutput = radioOutput[1..];
+                isReady = true;
             }
 
             if (radioOutput.StartsWith('j') && CcdiCommand.TryParse(radioOutput, out var queryResponseCommand))
@@ -271,12 +305,27 @@ public class TaitRadio
             }
             else if (radioOutput.StartsWith('e'))
             {
-                logger.LogWarning("Radio returned error {error}", radioOutput);
-                continue;
+                if (CcdiCommand.TryParse(radioOutput, out var errorCommand))
+                {
+                    var errorMessage = errorCommand.AsErrorMessage();
+                    if (errorMessage.Category == ErrorCategory.TransactionError)
+                    {
+                        logger.LogWarning("Radio returned transaction error {transactionError}",
+                            errorMessage.TransactionError.ToString());
+                    }
+                    else
+                    {
+                        logger.LogWarning("Radio returned system error: {radioOutput}", radioOutput);
+                    }
+                }
+                else
+                {
+                    logger.LogWarning("Radio returned unknown error {error}", radioOutput);
+                }
             }
             else
             {
-                Debugger.Break();
+                logger.LogError("Unexpected radio output: {radioOutput}", radioOutput);
             }
         }
     }

@@ -1,5 +1,7 @@
 ﻿namespace tait_ccdi;
 
+// see https://wiki.oarc.uk/_media/radios:tm8100-protocol-manual.pdf
+
 public record struct CcdiCommand
 {
     public char Ident { get; set; }
@@ -181,6 +183,26 @@ public record struct ProgressMessage
     public override readonly string ToString() => $"{ProgressType} {Para1} {Para2}   [{RadioOutput}]";
 }
 
+public record struct ErrorMessage
+{
+    public ErrorCategory Category { get; set; }
+    public TransactionError? TransactionError { get; set; }
+}
+
+public enum TransactionError
+{
+    UnsupportedCommand = 1,
+    ChecksumError = 2,
+    ParameterError = 3,
+    NotReadyError = 5,
+    CommandError = 6
+}
+
+public enum ErrorCategory
+{
+    TransactionError = 0, SystemError = 1
+}
+
 public class ProgressMessageEventArgs(ProgressMessage message) : EventArgs
 {
     public ProgressMessage ProgressMessage { get; } = message;
@@ -248,6 +270,21 @@ public static class CcdiCommandExtensions
         Data = ccdiCommand.Parameters![3..],
         Checksum = ccdiCommand.Checksum
     };
+
+    public static ErrorMessage AsErrorMessage(this CcdiCommand ccdiCommand)
+    {
+        var obj = new ErrorMessage
+        {
+            Category = (ErrorCategory)int.Parse(ccdiCommand.Parameters![..1]),
+        };
+
+        if (obj.Category == ErrorCategory.TransactionError && ccdiCommand.Parameters!.Length > 1)
+        {
+            obj.TransactionError = (TransactionError)int.Parse(ccdiCommand.Parameters![1..]);
+        }
+
+        return obj;
+    }
 
     public static ProgressMessage AsProgressMessage(this CcdiCommand ccdiCommand)
     {
