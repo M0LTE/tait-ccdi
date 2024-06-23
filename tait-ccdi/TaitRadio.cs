@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+﻿using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 using System.IO.Ports;
 
@@ -6,272 +6,328 @@ namespace tait_ccdi;
 
 public class TaitRadio
 {
-    public RadioState State { get; private set; }
-
-    private readonly SerialPort serialPort;
-
-    public TaitRadio(string comPort, int baud)
+    public TaitRadio(string comPort, int baud, ILogger logger)
     {
-        serialPort = new SerialPort(comPort, baud, Parity.None, 8, StopBits.One);
-        serialPort.NewLine = "\r";
-        serialPort.Open();
-        _ = Task.Run(RunRadio);
+        this.comPort = comPort;
+        this.baud = baud;
+        this.logger = logger;
+        var thread = new Thread(RunSerialPort);
+        thread.IsBackground = true;
+        thread.Start();
     }
 
-    private readonly BlockingCollection<QueryResponse> queryResponses = new(new ConcurrentQueue<QueryResponse>());
+    public RadioState State { get; private set; }
 
+    private readonly List<QueryResponse> queryResponses = new();
+    private readonly string comPort;
+    private readonly int baud;
+    private readonly ILogger logger;
+    
     public event EventHandler<ProgressMessageEventArgs>? ProgressMessageReceived;
     public event EventHandler<StateChangedEventArgs>? StateChanged;
     public event EventHandler<RssiEventArgs>? RawRssiUpdated;
     public event EventHandler<VswrEventArgs>? VswrChanged;
 
-    public async Task Run()
+    private StreamWriter? logWriter;
+
+    private void RunSerialPort()
     {
-        while (!done)
+        if (Directory.Exists("radiolog"))
         {
-            await Task.Delay(1000);
+            var key = Guid.NewGuid().ToString()[..4];
+            var binaryFile = $"radiolog-{key}.bin";
+            var textFile = $"radiolog-{key}.txt";
+            var log = File.Open(Path.Combine("radiolog", textFile), FileMode.Create);
+            logWriter = new StreamWriter(log);
+            logWriter.AutoFlush = true;
+            logger.LogInformation($"Writing radio bytes to {binaryFile} / {textFile}");
         }
-    }
-
-
-    bool done;
-    
-    private void RunRadio()
-    {
-        List<char> buffer = [];
 
         while (true)
         {
-            var i = serialPort.ReadByte();
+            logger.LogInformation("Opening serial port " + comPort);
 
-            if (i == -1 || i == 254)
+            using var serialPort = new SerialPort(comPort, baud, Parity.None, 8, StopBits.One);
+            serialPort.NewLine = "\r";
+            try
             {
-                done = true;
-                return;
+                serialPort.Open();
+            }
+            catch (Exception)
+            {
+                logger.LogError("Failed to open serial port " + comPort);
+                Thread.Sleep(5000);
+                continue;
             }
 
-            byte b = (byte)i;
+            logger.LogInformation("Opened serial port " + comPort);
 
-            if (b == '.')
+            string modelAndCcdiVersion;
+
+            while (!TryDetectTait(serialPort, out modelAndCcdiVersion))
             {
-                // radio signals the end of a message with a period
-                var radioOutput = new string(buffer.ToArray());
-                buffer.Clear();
-                if (string.IsNullOrWhiteSpace(radioOutput))
+                logger.LogInformation("Looking for a Tait radio...");
+            }
+
+            logger.LogInformation("Found a Tait radio: " + modelAndCcdiVersion);
+
+            try
+            {
+                RunRadio(serialPort);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, $"{ex.GetType().Name} in RunRadio()");
+                Thread.Sleep(5000);
+                continue;
+            }
+        }
+    }
+
+    private bool TryDetectTait(SerialPort serialPort, out string result)
+    {
+        serialPort.DiscardInBuffer();
+        serialPort.DiscardOutBuffer();
+
+        while (true)
+        {
+            serialPort.WriteLine(QueryCommands.ModelAndCcdiVersion);
+
+            if (!serialPort.TryReadTo("\r.", out var output, TimeSpan.FromSeconds(1)))
+            {
+                logger.LogWarning("Timeout reading from serial port");
+                result = "";
+                return false;
+            }
+
+            if (output.StartsWith(".m"))
+            {
+                serialPort.ReadExisting();
+                result = output[1..];
+                return true;
+            }
+        }
+    }
+
+    private void RunRadio(SerialPort serialPort)
+    {
+        var tokenSource = new CancellationTokenSource();
+        
+        Thread thread = new(() => HandleDataFromRadio(serialPort, tokenSource));
+        thread.IsBackground = true;
+        thread.Start();
+
+        HandleCommandsToRadio(serialPort, tokenSource);
+    }
+
+    private void HandleCommandsToRadio(SerialPort serialPort, CancellationTokenSource tokenSource)
+    {
+        Stopwatch paTempLastQueried = new();
+        Stopwatch swrLastQueried = new();
+        var within = TimeSpan.FromSeconds(1);
+
+        while (!tokenSource.IsCancellationRequested)
+        {
+            if (State == RadioState.ReceivingNoise || State == RadioState.ReceivingSignal)
+            {
+                serialPort.WriteLine(QueryCommands.Cctm_RawRssi);
+                ExpectQueryResponse(rawRssiQueryResponseCode, within);
+            }
+            else if (State == RadioState.Transmitting)
+            {
+                if (!swrLastQueried.IsRunning || swrLastQueried.Elapsed > TimeSpan.FromSeconds(0.25))
                 {
+                    serialPort.WriteLine(QueryCommands.Cctm_ForwardPower);
+                    ExpectQueryResponse(forwardPowerQueryResponseCode, within);
+                    serialPort.WriteLine(QueryCommands.Cctm_ReversePower);
+                    ExpectQueryResponse(reversePowerQueryResponseCode, within);
+                    swrLastQueried.Restart();
+                }
+            }
+
+            if (!paTempLastQueried.IsRunning || paTempLastQueried.Elapsed > TimeSpan.FromSeconds(10))
+            {
+                serialPort.WriteLine(QueryCommands.Cctm_PaTemperature);
+                ExpectQueryResponse(paTempQueryResponseCode, within);
+                paTempLastQueried.Restart();
+            }
+        }
+    }
+
+    const string paTempQueryResponseCode = "047";
+    const string rawRssiQueryResponseCode = "064";
+    const string forwardPowerQueryResponseCode = "318";
+    const string reversePowerQueryResponseCode = "319";
+
+    private bool ExpectQueryResponse(string responseCode, TimeSpan within)
+    {
+        Stopwatch stopwatch = Stopwatch.StartNew();
+
+        while (stopwatch.Elapsed < within)
+        {
+            lock (queryResponses)
+            {
+                var matchingResponses = queryResponses.Where(x => x.Command == responseCode);
+
+                if (!matchingResponses.Any())
+                {
+                    Thread.Sleep(10);
                     continue;
                 }
 
-                if (radioOutput.StartsWith('j') && CcdiCommand.TryParse(radioOutput, out var queryResponseCommand))
+                var queryResponse = matchingResponses.First();
+
+                if (queryResponse.Command == responseCode)
                 {
-                    var queryResponse = queryResponseCommand.AsQueryResponse();
-                    queryResponse.RadioOutput = radioOutput;
-                    queryResponses.Add(queryResponse);
+                    queryResponses.Remove(queryResponse);
+                    ProcessQueryResponse(queryResponse);
+                    return true;
                 }
-                else if (radioOutput.StartsWith('p') && CcdiCommand.TryParse(radioOutput, out var progressCommand))
+                else
                 {
-                    var progressMessage = progressCommand.AsProgressMessage();
-                    progressMessage.RadioOutput = radioOutput;
-                    HandleProgressMessage(progressMessage);
+                    logger.LogInformation("Binning unexpected response {responseCode}, waiting...", queryResponse.Command);
+                    Thread.Sleep(10);
+                    continue;
                 }
-                else if (radioOutput.StartsWith('e'))
+            }
+        }
+
+        return false;
+    }
+
+    private void ProcessQueryResponse(QueryResponse queryResponse)
+    {
+        if (queryResponse.Command == paTempQueryResponseCode)
+        {
+            logger.LogInformation("PA temperature: {paTemp}", queryResponse.Data);
+        }
+        else if (queryResponse.Command == rawRssiQueryResponseCode)
+        {
+            var rssi = double.Parse(queryResponse.Data) / 10.0;
+            RawRssiUpdated?.Invoke(this, new RssiEventArgs(rssi));
+        }
+        else if (queryResponse.Command == forwardPowerQueryResponseCode)
+        {
+            lastFwdPower = double.Parse(queryResponse.Data);
+        }
+        else if (queryResponse.Command == reversePowerQueryResponseCode)
+        {
+            var swr = GetVswr(lastFwdPower, double.Parse(queryResponse.Data));
+            if (swr.HasValue && !double.IsNaN(swr.Value))
+            {
+                VswrChanged?.Invoke(this, new VswrEventArgs(swr.Value));
+            }
+        }
+    }
+
+    double lastFwdPower;
+
+    private void HandleDataFromRadio(SerialPort serialPort, CancellationTokenSource tokenSource)
+    { 
+        logger.LogInformation("Waiting for data...");
+
+        while (!tokenSource.IsCancellationRequested)
+        {
+            if (!serialPort.TryReadTo("\r.", out var radioOutput, TimeSpan.FromSeconds(10)))
+            {
+                if (TryDetectTait(serialPort, out _))
                 {
-                    // ignore error messages
+                    logger.LogInformation("Radio is still there");
                     continue;
                 }
                 else
                 {
-                    Debugger.Break();
+                    logger.LogWarning("Radio has gone away");
+                    tokenSource.Cancel();
+                    return;
                 }
+            }
+
+            if (string.IsNullOrWhiteSpace(radioOutput))
+            {
+                logger.LogWarning("Radio returned nothing");
+                continue;
+            }
+
+            while (radioOutput.StartsWith('.'))
+            {
+                radioOutput = radioOutput[1..];
+            }
+
+            if (radioOutput.StartsWith('j') && CcdiCommand.TryParse(radioOutput, out var queryResponseCommand))
+            {
+                var queryResponse = queryResponseCommand.AsQueryResponse();
+                queryResponse.RadioOutput = radioOutput;
+                lock (queryResponses)
+                {
+                    queryResponses.Add(queryResponse);
+                }
+            }
+            else if (radioOutput.StartsWith('p') && CcdiCommand.TryParse(radioOutput, out var progressCommand))
+            {
+                var progressMessage = progressCommand.AsProgressMessage();
+                progressMessage.RadioOutput = radioOutput;
+                SetState(progressMessage.ProgressType);
+            }
+            else if (radioOutput.StartsWith('e'))
+            {
+                logger.LogWarning("Radio returned error {error}", radioOutput);
+                continue;
             }
             else
             {
-                if (b >= 33 && b <= 126)
-                {
-                    // write printable ascii to the buffer
-                    buffer.Add((char)b);
-                }
-                else if (b != 13) // radio sends CRs but we don't care
-                {
-                    // something we didn't anticipate
-                    //Debugger.Break();
-                }
+                Debugger.Break();
             }
         }
     }
 
-    private void HandleProgressMessage(ProgressMessage progressMessage)
+    private void SetState(ProgressType type)
     {
         var oldState = State;
 
-        if (progressMessage.ProgressType == ProgressType.ReceiverBusy)
-        {
-            State = RadioState.HearingSignal;
-        }
-        else if (progressMessage.ProgressType == ProgressType.ReceiverNotBusy)
-        {
-            State = RadioState.HearingNoise;
-        }
-        else if (progressMessage.ProgressType == ProgressType.PttMicActivated)
+        if (type == ProgressType.PttMicActivated)
         {
             State = RadioState.Transmitting;
         }
-        else if (progressMessage.ProgressType == ProgressType.PttMicDeactivated)
+        else if (type == ProgressType.PttMicDeactivated)
         {
-            State = RadioState.HearingNoise;
+            State = RadioState.ReceivingNoise;
+        }
+        else if (type == ProgressType.ReceiverBusy)
+        {
+            State = RadioState.ReceivingSignal;
+        }
+        else if (type == ProgressType.ReceiverNotBusy)
+        {
+            State = RadioState.ReceivingNoise;
         }
 
         if (oldState != State)
         {
             StateChanged?.Invoke(this, new StateChangedEventArgs(oldState, State));
-            if (State == RadioState.Transmitting)
-            {
-                StartGetVswr();
-            }
-            else if (oldState == RadioState.Transmitting && State != RadioState.Transmitting)
-            {
-                stopGettingVswr = true;
-            }
         }
-
-        ProgressMessageReceived?.Invoke(this, new ProgressMessageEventArgs(progressMessage));
     }
 
-    bool stopGettingVswr;
-
-    private void StartGetVswr()
-    {
-        _ = Task.Run(() =>
-        {
-            while (!stopGettingVswr)
-            {
-                var vswr = GetVswr();
-                if (vswr != null && vswr > 1)
-                {
-                    VswrChanged?.Invoke(this, new(vswr.Value));
-                }
-            }
-
-            stopGettingVswr = false;
-        });
-    }
-
-    private QueryResponse? WaitForQueryResponse(string command, Func<string, bool>? validator = null)
-    {
-        while (!queryResponses.IsCompleted)
-        {
-            var response = queryResponses.Take();
-
-            bool valid = validator == null || validator(response.Data);
-
-            if (response.Command == command)
-            {
-                if (valid)
-                {
-                    return response;
-                }
-            }
-
-            if (valid)
-            {
-                // put it back for the next guy
-                queryResponses.Add(response);
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Raw received signal strength in dBm
-    /// </summary>
-    /// <returns></returns>
-    public double GetRawRssi()
-    {
-        serialPort.WriteLine(QueryCommands.Cctm_RawRssi);
-        var value = WaitForQueryResponse("064");
-        return value == null ? default : double.Parse(value.Value.Data) / 10.0;
-    }
-
-    /// <summary>
-    /// Averaged received signal strength in dBm
-    /// Period unknown
-    /// </summary>
-    /// <returns></returns>
-    public double GetAveragedRssi()
-    {
-        serialPort.WriteLine(QueryCommands.Cctm_AveragedRssi);
-        var value = WaitForQueryResponse("063");
-        return value == null ? default : double.Parse(value.Value.Data) / 10.0;
-    }
-
-    /// <summary>
-    /// Forward power in mV, from 0 to 1200mV
-    /// </summary>
-    /// <returns></returns>
-    public int GetForwardVoltage()
-    {
-        serialPort.WriteLine(QueryCommands.Cctm_ForwardPower);
-        var value = WaitForQueryResponse("318");
-        return value == null ? default : int.Parse(value.Value.Data);
-    }
-
-    /// <summary>
-    /// Reverse power in mV, from 0 to 1200mV
-    /// </summary>
-    /// <returns></returns>
-    public double GetReverseVoltage()
-    {
-        serialPort.WriteLine(QueryCommands.Cctm_ReversePower);
-        var value = WaitForQueryResponse("319");
-        return value == null ? default : int.Parse(value.Value.Data);
-    }
-
-    /// <summary>
-    /// PA temperature in degrees C
-    /// </summary>
-    /// <returns></returns>
-    public double GetPaTemperature()
-    {
-        serialPort.WriteLine(QueryCommands.Cctm_PaTemperature);
-        var value = WaitForQueryResponse("047", result => double.TryParse(result, out var i) && i < 100);
-        var result = value == null ? default : double.Parse(value.Value.Data);
-        return result;
-    }
+    // raw rssi 064
+    // averaged rssi 063
+    // forward power 318
+    // reverse power 319
+    // pa temperature 047
 
     /// <summary>
     /// Get the VSWR from the forward and reverse voltage.
     /// </summary>
     /// <returns></returns>
-    public double? GetVswr()
+    private static double? GetVswr(double forward, double reverse)
     {
-        if (State != RadioState.Transmitting)
-        {
-            return default;
-        }
-
-        double forward = GetForwardVoltage();
-        double reverse = GetReverseVoltage();
         double top = forward + reverse;
         double bottom = forward - reverse;
         double result = top / bottom;
         return result;
     }
-
-    public void StartGetRawRssi()
-    {
-        _ = Task.Run(() =>
-        {
-            while (true)
-            {
-                var rssi = GetRawRssi();
-                RawRssiUpdated?.Invoke(this, new RssiEventArgs(rssi));
-            }
-        });
-    }
 }
 
 public enum RadioState
 {
-    HearingNoise, HearingSignal, Transmitting
+    ReceivingNoise, ReceivingSignal, Transmitting
 }

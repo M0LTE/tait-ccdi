@@ -1,49 +1,67 @@
-﻿using MathNet.Numerics.Statistics;
-using System.Diagnostics;
+﻿using harness;
+using Microsoft.Extensions.Logging;
+using System.IO.Ports;
 using tait_ccdi;
 
-var radio = new TaitRadio("COM3", 28800);
-radio.StateChanged += (sender, args) =>
-{
-    Console.WriteLine($"Radio state transition {args.From} --> {args.To}");
-};
+/*var sp = new SerialPort("COM2", 28800);
+sp.Open();
+sp.NewLine = "\r";
+sp.WriteLine("q010FE");
+sp.ReadTimeout = 5000;
 
-var stopwatch = Stopwatch.StartNew();
+var output = sp.ReadTo("\r.");
 
-var nf = new List<double>();
-
+List<byte> bytes = new();
 while (true)
 {
-    if (radio.State == RadioState.Transmitting)
+    try
     {
-        var vswr = radio.GetVswr();
-        if (vswr.HasValue)
-        {
-            var paTemp = radio.GetPaTemperature();
-            if (radio.State == RadioState.Transmitting)
-            {
-                Console.WriteLine($"{stopwatch.ElapsedMilliseconds:000}ms   vswr:{vswr:0.0}:1   paTemp:{paTemp}C");
-            }
-        }
+        var b = sp.ReadByte();
+        bytes.Add((byte)b);
+        Console.Write("0x" + b.ToString("X").ToLower() + " ");
     }
-    else
+    catch (TimeoutException ex)
     {
-        double rawRssi = radio.GetRawRssi();
-        if (radio.State == RadioState.HearingSignal)
-        {
-            var averageNoiseFloor = nf.Median();
-            Console.WriteLine($"{stopwatch.ElapsedMilliseconds:000}ms   rssi:{rawRssi:0.0}dBm   nf:{averageNoiseFloor:0.0}dBm   snr:{rawRssi - averageNoiseFloor:0.0}dB");
-        }
-        else
-        {
-            // measure the noise floor while idle
-            nf.Add(rawRssi);
-            if (nf.Count > 100)
-            {
-                nf.RemoveAt(0);
-            }
-        }
+        break;
     }
-
-    stopwatch.Restart();
 }
+
+using var fs = File.OpenWrite("response.bin");
+fs.Write(bytes.ToArray());
+return;*/
+
+var logger = ConsoleWritelineLogger.Instance;
+
+var radio = new TaitRadio("COM2", 28800, logger);
+
+object lockObj = new();
+Console.CursorVisible = false;
+
+radio.StateChanged += (sender, e) =>
+{
+    lock (lockObj)
+    {
+        logger.LogInformation($"Radio state changed to {e.To}");
+    }
+};
+
+radio.RawRssiUpdated += (sender, e) =>
+{
+    lock (lockObj)
+    {
+        var (Left, Top) = Console.GetCursorPosition();
+        Console.SetCursorPosition(Console.WindowWidth - 16, 0);
+        Console.Write($"RSSI: {e.Rssi,6:0.0} dBm");
+        Console.SetCursorPosition(Left, Top);
+    }
+};
+
+radio.VswrChanged += (sender, e) =>
+{
+    lock (lockObj)
+    {
+        logger.LogInformation($"VSWR: {e.Vswr:0.0} : 1");
+    }
+};
+
+Thread.CurrentThread.Join();

@@ -209,9 +209,21 @@ public enum ProgressType
     TxInhibited = 0x02,
     EmergencyModeInitiated = 0x03,
     EmergencyModeTerminated = 0x04,
+    /// <summary>
+    /// Signal is being received
+    /// </summary>
     ReceiverBusy = 0x05,
+    /// <summary>
+    /// No signal is being received
+    /// </summary>
     ReceiverNotBusy = 0x06,
+    /// <summary>
+    /// Radio has started transmit
+    /// </summary>
     PttMicActivated = 0x07,
+    /// <summary>
+    /// Radio has ended transmit
+    /// </summary>
     PttMicDeactivated = 0x08,
     SelcallRetry = 0x16,
     RadioStunned = 0x17,
