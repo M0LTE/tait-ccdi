@@ -32,7 +32,8 @@ return;*/
 
 var logger = ConsoleWritelineLogger.Instance;
 
-var radio = new TaitRadio("COM2", 28800, logger);
+var radio = new TaitRadio(new RealSerialPortWrapper("COM2", 28800), logger);
+//var radio = new TaitRadio(new FakeRadio(), logger);
 
 object lockObj = new();
 Console.CursorVisible = false;

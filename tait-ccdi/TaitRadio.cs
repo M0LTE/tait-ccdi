@@ -1,17 +1,16 @@
 ﻿using Microsoft.Extensions.Logging;
 using System.Diagnostics;
-using System.IO.Ports;
 
 namespace tait_ccdi;
+
 
 // see https://wiki.oarc.uk/_media/radios:tm8100-protocol-manual.pdf
 
 public class TaitRadio
 {
-    public TaitRadio(string comPort, int baud, ILogger logger)
+    public TaitRadio(ISerialPort serialPort, ILogger logger)
     {
-        this.comPort = comPort;
-        this.baud = baud;
+        this.serialPort = serialPort;
         this.logger = logger;
         var thread = new Thread(RunSerialPort);
         thread.IsBackground = true;
@@ -21,8 +20,7 @@ public class TaitRadio
     public RadioState State { get; private set; }
 
     private readonly List<QueryResponse> queryResponses = new();
-    private readonly string comPort;
-    private readonly int baud;
+    private readonly ISerialPort serialPort;
     private readonly ILogger logger;
     
     public event EventHandler<ProgressMessageEventArgs>? ProgressMessageReceived;
@@ -47,22 +45,20 @@ public class TaitRadio
 
         while (true)
         {
-            logger.LogInformation("Opening serial port " + comPort);
+            logger.LogInformation("Opening serial port " + serialPort);
 
-            using var serialPort = new SerialPort(comPort, baud, Parity.None, 8, StopBits.One);
-            serialPort.NewLine = "\r";
             try
             {
                 serialPort.Open();
             }
             catch (Exception)
             {
-                logger.LogError("Failed to open serial port " + comPort);
+                logger.LogError("Failed to open serial port " + serialPort);
                 Thread.Sleep(5000);
                 continue;
             }
 
-            logger.LogInformation("Opened serial port " + comPort);
+            logger.LogInformation("Opened serial port " + serialPort);
 
             string modelAndCcdiVersion;
 
@@ -86,7 +82,7 @@ public class TaitRadio
         }
     }
 
-    private bool TryDetectTait(SerialPort serialPort, out string result)
+    private bool TryDetectTait(ISerialPort serialPort, out string result)
     {
         serialPort.DiscardInBuffer();
         serialPort.DiscardOutBuffer();
@@ -112,7 +108,7 @@ public class TaitRadio
         }
     }
 
-    private void RunRadio(SerialPort serialPort)
+    private void RunRadio(ISerialPort serialPort)
     {
         var tokenSource = new CancellationTokenSource();
         
@@ -123,7 +119,7 @@ public class TaitRadio
         HandleCommandsToRadio(serialPort, tokenSource);
     }
 
-    private void HandleCommandsToRadio(SerialPort serialPort, CancellationTokenSource tokenSource)
+    private void HandleCommandsToRadio(ISerialPort serialPort, CancellationTokenSource tokenSource)
     {
         Stopwatch paTempLastQueried = new();
         Stopwatch swrLastQueried = new();
@@ -255,7 +251,7 @@ public class TaitRadio
     double lastFwdPower;
     bool isReady;
 
-    private void HandleDataFromRadio(SerialPort serialPort, CancellationTokenSource tokenSource)
+    private void HandleDataFromRadio(ISerialPort serialPort, CancellationTokenSource tokenSource)
     { 
         logger.LogInformation("Waiting for data...");
 

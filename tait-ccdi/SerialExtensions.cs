@@ -1,10 +1,8 @@
-﻿using System.IO.Ports;
-
-namespace tait_ccdi;
+﻿namespace tait_ccdi;
 
 public static class SerialExtensions
 {
-    public static bool TryReadTo(this SerialPort serialPort, string value, out string output, TimeSpan? timeSpan = null)
+    public static bool TryReadTo(this ISerialPort serialPort, string value, out string output, TimeSpan? timeSpan = null)
     {
         var oldTimeout = serialPort.ReadTimeout;
         if (timeSpan.HasValue)
