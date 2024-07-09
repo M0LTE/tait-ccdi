@@ -224,6 +224,12 @@ public class VswrEventArgs(double vswr) : EventArgs
     public double Vswr { get; } = vswr;
 }
 
+public class PaTempEventArgs(int? readTempC, int readAdcValue) : EventArgs
+{
+    public int? TempC { get; } = readTempC;
+    public int AdcValue { get; } = readAdcValue;
+}
+
 public enum ProgressType
 {
     CallAnswered = 0x00,

@@ -41,6 +41,20 @@ public class CcdiCommandTests
     }
 
     [Fact]
+    public void PaTempResponse2()
+    {
+        CcdiCommand.TryParse("j06047467F4", out var ccdiCommand).Should().BeTrue();
+        ccdiCommand.Ident.Should().Be('j');
+        ccdiCommand.Size.Should().Be(6);
+        ccdiCommand.Parameters.Should().Be("047467");
+        ccdiCommand.Checksum.Should().Be("F4");
+
+        var queryResults = ccdiCommand.AsQueryResponse();
+        queryResults.Command.Should().Be("047");
+        queryResults.Data.Should().Be("467");
+    }
+
+    [Fact]
     public void PowerResponse()
     {
         CcdiCommand.TryParse("j06047481F8", out var ccdiCommand).Should().BeTrue();

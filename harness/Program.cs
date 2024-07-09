@@ -32,7 +32,9 @@ return;*/
 
 var logger = ConsoleWritelineLogger.Instance;
 
-var radio = new TaitRadio(new RealSerialPortWrapper("COM2", 28800), logger);
+var sp = new SerialPort("COM2", 28800);
+sp.Open();
+var radio = new TaitRadio(new RealSerialPortWrapper(sp), logger);
 //var radio = new TaitRadio(new FakeRadio(), logger);
 
 object lockObj = new();
@@ -65,4 +67,19 @@ radio.VswrChanged += (sender, e) =>
     }
 };
 
-Thread.CurrentThread.Join();
+radio.PaTempRead += (sender, e) =>
+{
+    lock (lockObj)
+    {
+        logger.LogInformation($"PA Temp: {e.TempC} °C, ADC value: {e.AdcValue}");
+    }
+};
+
+//Thread.CurrentThread.Join();
+
+while (true)
+{
+    Console.WriteLine("enter something");
+    var input = Console.ReadLine();
+    //radio.SendCommand();
+}
