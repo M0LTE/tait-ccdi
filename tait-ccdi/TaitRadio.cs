@@ -96,7 +96,7 @@ public class TaitRadio
             }
             else
             {
-                logger.LogInformation("Radio responded with {response}", response);
+                logger.LogInformation("Found radio; model/version: {response}", response);
                 break;
             }
         }
@@ -325,16 +325,23 @@ public class TaitRadio
             // first one is temp in C
             // second one is ADC value in mV (0 to 1200)
 
+            PaTempEventArgs? ea = null;
+
             if (SpinWait.SpinUntil(() => paTempResponses.Count == 2, TimeSpan.FromMilliseconds(100)))
             {
-                PaTempRead?.Invoke(this, new PaTempEventArgs(paTempResponses[0], paTempResponses[1]));
+                ea = new PaTempEventArgs(paTempResponses[0], paTempResponses[1]);
             }
             else if (paTempResponses.Count == 1)
             {
-                PaTempRead?.Invoke(this, new PaTempEventArgs(null, paTempResponses[0]));
+                ea = new PaTempEventArgs(null, paTempResponses[0]);
             }
 
             paTempResponses.Clear();
+
+            if (ea != null && (ea.TempC == null || ea.TempC <= 100))
+            {
+                PaTempRead?.Invoke(this, ea);
+            }
         }
     }
 

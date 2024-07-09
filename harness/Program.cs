@@ -3,6 +3,12 @@ using Microsoft.Extensions.Logging;
 using System.IO.Ports;
 using tait_ccdi;
 
+Dictionary<RadioState, string> displayStates = new() {
+    { RadioState.Transmitting, "TX " },
+    { RadioState.ReceivingSignal, "SIG" },
+    { RadioState.ReceivingNoise, "RX " },
+};
+
 var logger = ConsoleWritelineLogger.Instance;
 
 var sp = new SerialPort("COM2", 28800);
@@ -11,12 +17,16 @@ var radio = new TaitRadio(new RealSerialPortWrapper(sp), logger);
 
 object lockObj = new();
 Console.CursorVisible = false;
+Console.WriteLine();
 
 radio.StateChanged += (sender, e) =>
 {
     lock (lockObj)
     {
-        logger.LogInformation($"Radio state changed to {e.To}");
+        var (Left, Top) = Console.GetCursorPosition();
+        Console.SetCursorPosition(Console.WindowWidth - 45, 0);
+        Console.Write($"State: {displayStates[e.To]}");
+        Console.SetCursorPosition(Left, Top);
     }
 };
 
@@ -35,7 +45,10 @@ radio.VswrChanged += (sender, e) =>
 {
     lock (lockObj)
     {
-        logger.LogInformation($"VSWR: {e.Vswr:0.0} : 1");
+        var (Left, Top) = Console.GetCursorPosition();
+        Console.SetCursorPosition(Console.WindowWidth - 33, 0);
+        Console.Write($"VSWR: {e.Vswr,3:0.0}:1");
+        Console.SetCursorPosition(Left, Top);
     }
 };
 
@@ -43,7 +56,10 @@ radio.PaTempRead += (sender, e) =>
 {
     lock (lockObj)
     {
-        logger.LogInformation($"PA Temp: {e.TempC} °C, ADC value: {e.AdcValue}");
+        var (Left, Top) = Console.GetCursorPosition();
+        Console.SetCursorPosition(Console.WindowWidth - 60, 0);
+        Console.Write($"Temp: {e.TempC,3:0.0}°C");
+        Console.SetCursorPosition(Left, Top);
     }
 };
 
