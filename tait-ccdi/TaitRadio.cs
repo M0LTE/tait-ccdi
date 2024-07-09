@@ -89,7 +89,7 @@ public class TaitRadio
         {
             serialPort.ReadExisting();
             serialPort.WriteLine(QueryCommands.ModelAndCcdiVersion);
-            var response = ReadResponseTypeAndResponse('m', serialPort, TimeSpan.FromSeconds(1));
+            var response = ReadResponseTypeAndResponse('m', TimeSpan.FromSeconds(1));
             if (string.IsNullOrWhiteSpace(response))
             {
                 logger.LogInformation("Looking for radio...");
@@ -128,7 +128,7 @@ public class TaitRadio
             }
             else if (readChar == 'p' || readChar == 'e' || readChar == 'j')
             {
-                var messageBody = ReadResponse(serialPort, TimeSpan.FromSeconds(1));
+                var messageBody = ReadResponse(TimeSpan.FromSeconds(1));
                 if (messageBody == null)
                 {
                     logger.LogError("Failed to read message {message} in 5s", readChar);
@@ -189,12 +189,7 @@ public class TaitRadio
             }
             else
             {
-                logger.LogError("Unexpected character: {readChar}", readChar);
-
-                if (Debugger.IsAttached)
-                {
-                    Debugger.Break();
-                }
+                logger.LogWarning("Unexpected character read from radio: 0x{readChar}", ((int)readChar).ToHex());
             }
         }
     }
@@ -239,7 +234,7 @@ public class TaitRadio
         }
     }
 
-    private static string? ReadResponse(ISerialPort serialPort, TimeSpan timeout)
+    private string? ReadResponse(TimeSpan timeout)
     {
         var oldTimeout = serialPort.ReadTimeout;
         serialPort.ReadTimeout = timeout;
@@ -271,13 +266,18 @@ public class TaitRadio
         {
             return null;
         }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error reading response");
+            return null;
+        }
         finally
         {
             serialPort.ReadTimeout = oldTimeout;
         }
     }
 
-    private static string? ReadResponseTypeAndResponse(char expectedResponseType, ISerialPort serialPort, TimeSpan timeout)
+    private string? ReadResponseTypeAndResponse(char expectedResponseType, TimeSpan timeout)
     {
         var oldTimeout = serialPort.ReadTimeout;
         serialPort.ReadTimeout = timeout;
@@ -307,6 +307,11 @@ public class TaitRadio
         }
         catch (TimeoutException)
         {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error reading response");
             return null;
         }
         finally
