@@ -1,5 +1,4 @@
 ﻿using Microsoft.Extensions.Logging;
-using System.ComponentModel;
 using System.Diagnostics;
 
 namespace tait_ccdi;
@@ -7,18 +6,8 @@ namespace tait_ccdi;
 
 // see https://wiki.oarc.uk/_media/radios:tm8100-protocol-manual.pdf
 
-public interface ISerialPort
-{
-    int ReadByte();
-    void WriteLine(string line);
-    string ReadTo(string value);
-    string? ReadExisting();
-    TimeSpan ReadTimeout { get; set; }
-}
-
 public class TaitRadio
 {
-    public event EventHandler<ProgressMessageEventArgs>? ProgressMessageReceived;
     public event EventHandler<StateChangedEventArgs>? StateChanged;
     public event EventHandler<RssiEventArgs>? RawRssiUpdated;
     public event EventHandler<VswrEventArgs>? VswrChanged;
@@ -26,20 +15,41 @@ public class TaitRadio
 
     private readonly ISerialPort serialPort;
     private readonly ILogger logger;
+    private readonly object commandLock = new();
+    private readonly List<int> paTempResponses = [];
+
+    private double? rssi;
+    private double? fwdPower, revPower;
+    bool ready;
+    private RadioState state;
 
     public TaitRadio(ISerialPort serialPort, ILogger logger)
     {
         this.serialPort = serialPort;
         this.logger = logger;
-        var thread = new Thread(RunSerialPort);
-        thread.IsBackground = true;
-        thread.Start();
+
+        var serialListenerThread = new Thread(SerialPortListener);
+        serialListenerThread.IsBackground = true;
+        serialListenerThread.Start();
     }
 
-    private enum ReadState
+    /// <summary>
+    /// Get the VSWR from the forward and reverse voltage.
+    /// </summary>
+    /// <returns></returns>
+    private static double? GetVswr(double forward, double reverse)
     {
-        WaitingForPrompt,
-        WaitingForDataOrCommand
+        double top = forward + reverse;
+        double bottom = forward - reverse;
+        double result = top / bottom;
+        return result;
+    }
+
+    private void SendCommand(string command)
+    {
+        SpinWait.SpinUntil(() => ready);
+        ready = false;
+        serialPort.WriteLine(command);
     }
 
     static void DebugSerialPortOutputToConsole(ISerialPort serialPort)
@@ -79,7 +89,7 @@ public class TaitRadio
         {
             serialPort.ReadExisting();
             serialPort.WriteLine(QueryCommands.ModelAndCcdiVersion);
-            var response = ReadResponse('m', serialPort, TimeSpan.FromSeconds(1));
+            var response = ReadResponseTypeAndResponse('m', serialPort, TimeSpan.FromSeconds(1));
             if (string.IsNullOrWhiteSpace(response))
             {
                 logger.LogInformation("Looking for radio...");
@@ -92,49 +102,47 @@ public class TaitRadio
         }
     }
 
-    bool ready;
-
-    private void RunSerialPort()
+    private void SerialPortListener()
     {
         WaitForRadio();
+
+        var dataGathererThread = new Thread(GatherDataBasedOnState);
+        dataGathererThread.IsBackground = true;
+        dataGathererThread.Start();
 
         using Timer timer = new(SendGetTemperatureQuery, null, 0, 60000);
 
         while (true)
         {
-            if (!serialPort.TryReadChar(TimeSpan.FromSeconds(10), out var c))
+            if (!serialPort.TryReadChar(TimeSpan.FromSeconds(10), out var readChar))
             {
                 logger.LogInformation("No data read");
                 continue;
             }
 
-            ready = c == '.';
+            ready = readChar == '.';
 
-            if (c == '.')
+            if (readChar == '.')
             {
                 continue;
             }
-            else if (c == 'p' || c == 'e' || c == 'j')
+            else if (readChar == 'p' || readChar == 'e' || readChar == 'j')
             {
-                var message = ReadResponse(serialPort, TimeSpan.FromSeconds(5));
-                if (message == null)
+                var messageBody = ReadResponse(serialPort, TimeSpan.FromSeconds(1));
+                if (messageBody == null)
                 {
-                    logger.LogError("Failed to read message {message} in 5s", c);
+                    logger.LogError("Failed to read message {message} in 5s", readChar);
                 }
                 else
                 {
-                    var msg = c + message;
-                    if (CcdiChecksum.Validate(msg))
-                    {
-                        logger.LogInformation("Got message {msg}", msg);
-                    }
-                    else
+                    var message = readChar + messageBody;
+                    /*if (!CcdiChecksum.Validate(msg))
                     {
                         logger.LogError(msg + " has invalid checksum");
                         continue;
-                    }
+                    }*/
 
-                    if (CcdiCommand.TryParse(msg, out var command))
+                    if (CcdiCommand.TryParse(message, out var command))
                     {
                         if (command.Ident == 'j')
                         {
@@ -145,46 +153,91 @@ public class TaitRadio
                                 // this may result in two separate responses depending on radio model
                                 paTempResponses.Add(int.Parse(response.Data));
                             }
+                            else if (response.Command == "064")
+                            {
+                                rssi = double.Parse(response.Data) / 10.0;
+                            }
+                            else if (response.Command == "318")
+                            {
+                                fwdPower = double.Parse(response.Data);
+                            }
+                            else if (response.Command == "319")
+                            {
+                                revPower = double.Parse(response.Data);
+                            }
                             else
                             {
-                                logger.LogInformation($"query response: {response.Data}");
+                                logger.LogInformation($"query response: command:{response.Command} data:{response.Data}");
                             }
                         }
                         else if (command.Ident == 'p')
                         {
                             var progress = command.AsProgressMessage();
-                            logger.LogInformation($"progress: {progress.ProgressType}");
                             HandleProgress(progress.ProgressType);
                         }
                         else if (command.Ident == 'e')
                         {
                             var error = command.AsErrorMessage();
-                            logger.LogWarning($"error: {error.Category}");
                             HandleError(error);
                         }
                     }
                     else
                     {
-                        logger.LogWarning("Could not parse {message} as CcdiCommand", msg);
+                        logger.LogWarning("Could not parse {message} as CcdiCommand", message);
                     }
                 }
             }
             else
             {
-                Debugger.Break();
+                logger.LogError("Unexpected character: {readChar}", readChar);
+
+                if (Debugger.IsAttached)
+                {
+                    Debugger.Break();
+                }
             }
         }
     }
 
     private void HandleError(ErrorMessage error)
     {
+        logger.LogWarning($"error: {error.Category}");
     }
 
     private void HandleProgress(ProgressType progressType)
     {
-    }
+        var oldState = state;
 
-    List<int> paTempResponses = new();
+        if (progressType == ProgressType.PttMicActivated)
+        {
+            state = RadioState.Transmitting;
+            if (oldState != RadioState.Transmitting)
+            {
+                transmittingFor.Restart();
+            }
+        }
+        else if (progressType == ProgressType.PttMicDeactivated)
+        {
+            state = RadioState.ReceivingNoise;
+            if (oldState == RadioState.Transmitting)
+            {
+                transmittingFor.Stop();
+            }
+        }
+        else if (progressType == ProgressType.ReceiverBusy)
+        {
+            state = RadioState.ReceivingSignal;
+        }
+        else if (progressType == ProgressType.ReceiverNotBusy)
+        {
+            state = RadioState.ReceivingNoise;
+        }
+
+        if (oldState != state)
+        {
+            StateChanged?.Invoke(this, new StateChangedEventArgs(oldState, state));
+        }
+    }
 
     private static string? ReadResponse(ISerialPort serialPort, TimeSpan timeout)
     {
@@ -224,7 +277,7 @@ public class TaitRadio
         }
     }
 
-    private static string? ReadResponse(char expectedResponseType, ISerialPort serialPort, TimeSpan timeout)
+    private static string? ReadResponseTypeAndResponse(char expectedResponseType, ISerialPort serialPort, TimeSpan timeout)
     {
         var oldTimeout = serialPort.ReadTimeout;
         serialPort.ReadTimeout = timeout;
@@ -260,17 +313,14 @@ public class TaitRadio
         {
             serialPort.ReadTimeout = oldTimeout;
         }
-    } 
-
-    private object commandLock = new();
+    }
 
     private void SendGetTemperatureQuery(object? _)
     {
         lock (commandLock)
         {
-            SpinWait.SpinUntil(() => ready);
-            ready = false;
-            serialPort.WriteLine(QueryCommands.Cctm_PaTemperature);
+            SendCommand(QueryCommands.Cctm_PaTemperature);
+
             // on the 8100 the PA temp query results in two completely separate responses
             // first one is temp in C
             // second one is ADC value in mV (0 to 1200)
@@ -287,341 +337,73 @@ public class TaitRadio
             paTempResponses.Clear();
         }
     }
-}
 
-public class TaitRadio_old
-{
-    public TaitRadio_old(ISerialPort_old serialPort, ILogger logger)
+    private void GatherDataBasedOnState()
     {
-        this.serialPort = serialPort;
-        this.logger = logger;
-        var thread = new Thread(RunSerialPort);
-        thread.IsBackground = true;
-        thread.Start();
-    }
-
-    public RadioState State { get; private set; }
-
-    private readonly List<QueryResponse> queryResponses = new();
-    private readonly ISerialPort_old serialPort;
-    private readonly ILogger logger;
-    
-    public event EventHandler<ProgressMessageEventArgs>? ProgressMessageReceived;
-    public event EventHandler<StateChangedEventArgs>? StateChanged;
-    public event EventHandler<RssiEventArgs>? RawRssiUpdated;
-    public event EventHandler<VswrEventArgs>? VswrChanged;
-
-    private StreamWriter? logWriter;
-
-    private void RunSerialPort()
-    {
-        if (Directory.Exists("radiolog"))
-        {
-            var key = Guid.NewGuid().ToString()[..4];
-            var binaryFile = $"radiolog-{key}.bin";
-            var textFile = $"radiolog-{key}.txt";
-            var log = File.Open(Path.Combine("radiolog", textFile), FileMode.Create);
-            logWriter = new StreamWriter(log);
-            logWriter.AutoFlush = true;
-            logger.LogInformation($"Writing radio bytes to {binaryFile} / {textFile}");
-        }
-
         while (true)
         {
-            logger.LogInformation("Opening serial port " + serialPort);
-
-            try
+            if (state == RadioState.ReceivingNoise || state == RadioState.ReceivingSignal)
             {
-                serialPort.Open();
-            }
-            catch (Exception)
-            {
-                logger.LogError("Failed to open serial port " + serialPort);
-                Thread.Sleep(5000);
-                continue;
-            }
-
-            logger.LogInformation("Opened serial port " + serialPort);
-
-            string modelAndCcdiVersion;
-
-            try
-            {
-                RunRadio(serialPort);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, $"{ex.GetType().Name} in RunRadio()");
-                Thread.Sleep(5000);
-                continue;
-            }
-        }
-    }
-
-    private void RunRadio(ISerialPort_old serialPort)
-    {
-        var tokenSource = new CancellationTokenSource();
-        
-        Thread thread = new(() => HandleDataFromRadio(serialPort, tokenSource));
-        thread.IsBackground = true;
-        thread.Start();
-
-        HandleCommandsToRadio(serialPort, tokenSource);
-    }
-
-    private void HandleCommandsToRadio(ISerialPort_old serialPort, CancellationTokenSource tokenSource)
-    {
-        Stopwatch paTempLastQueried = new();
-        Stopwatch swrLastQueried = new();
-        var within = TimeSpan.FromSeconds(1);
-
-        while (!tokenSource.IsCancellationRequested)
-        {
-            if (State == RadioState.ReceivingNoise || State == RadioState.ReceivingSignal)
-            {
-                WaitUntilReady();
-                lock (serialPort)
+                lock (commandLock)
                 {
-                    isReady = false;
-                    serialPort.WriteLine(QueryCommands.Cctm_RawRssi);
-                    ExpectQueryResponse(rawRssiQueryResponseCode, within);
-                }
-            }
-            else if (State == RadioState.Transmitting)
-            {
-                if (!swrLastQueried.IsRunning || swrLastQueried.Elapsed > TimeSpan.FromSeconds(0.25))
-                {
-                    WaitUntilReady();
-                    lock (serialPort)
+                    SendCommand(QueryCommands.Cctm_RawRssi);
+                    if (SpinWait.SpinUntil(() => rssi != null, TimeSpan.FromSeconds(1)))
                     {
-                        isReady = false;
-                        serialPort.WriteLine(QueryCommands.Cctm_ForwardPower);
-                        ExpectQueryResponse(forwardPowerQueryResponseCode, within);
-                    }
-                    WaitUntilReady();
-                    lock (serialPort)
-                    {
-                        isReady = false;
-                        serialPort.WriteLine(QueryCommands.Cctm_ReversePower);
-                        ExpectQueryResponse(reversePowerQueryResponseCode, within);
-                    }
-                    swrLastQueried.Restart();
-                }
-            }
-
-            if (!paTempLastQueried.IsRunning || paTempLastQueried.Elapsed > TimeSpan.FromSeconds(10))
-            {
-                WaitUntilReady();
-                lock (serialPort)
-                {
-                    isReady = false;
-                    serialPort.WriteLine(QueryCommands.Cctm_PaTemperature);
-                    ExpectQueryResponse(paTempQueryResponseCode, within);
-                }
-                paTempLastQueried.Restart();
-            }
-        }
-    }
-
-    private void WaitUntilReady()
-    {
-        while (!isReady)
-        {
-            Thread.Sleep(5);
-        }
-    }
-
-    const string paTempQueryResponseCode = "047";
-    const string rawRssiQueryResponseCode = "064";
-    const string forwardPowerQueryResponseCode = "318";
-    const string reversePowerQueryResponseCode = "319";
-
-    private bool ExpectQueryResponse(string responseCode, TimeSpan within)
-    {
-        Stopwatch stopwatch = Stopwatch.StartNew();
-
-        while (stopwatch.Elapsed < within)
-        {
-            lock (queryResponses)
-            {
-                var matchingResponses = queryResponses.Where(x => x.Command == responseCode);
-
-                if (!matchingResponses.Any())
-                {
-                    Thread.Sleep(10);
-                    continue;
-                }
-
-                var queryResponse = matchingResponses.First();
-
-                if (queryResponse.Command == responseCode)
-                {
-                    queryResponses.Remove(queryResponse);
-                    ProcessQueryResponse(queryResponse);
-                    return true;
-                }
-                else
-                {
-                    logger.LogInformation("Unexpected response {responseCode}, waiting...", queryResponse.Command);
-                    Thread.Sleep(10);
-                    continue;
-                }
-            }
-        }
-
-        logger.LogWarning("Timed out waiting for response {responseCode}", responseCode);
-        return false;
-    }
-
-    private void ProcessQueryResponse(QueryResponse queryResponse)
-    {
-        if (queryResponse.Command == paTempQueryResponseCode)
-        {
-            logger.LogInformation("PA temperature: {paTemp}", queryResponse.Data);
-        }
-        else if (queryResponse.Command == rawRssiQueryResponseCode)
-        {
-            var rssi = double.Parse(queryResponse.Data) / 10.0;
-            RawRssiUpdated?.Invoke(this, new RssiEventArgs(rssi));
-        }
-        else if (queryResponse.Command == forwardPowerQueryResponseCode)
-        {
-            lastFwdPower = double.Parse(queryResponse.Data);
-        }
-        else if (queryResponse.Command == reversePowerQueryResponseCode)
-        {
-            var swr = GetVswr(lastFwdPower, double.Parse(queryResponse.Data));
-            if (swr.HasValue && !double.IsNaN(swr.Value))
-            {
-                VswrChanged?.Invoke(this, new VswrEventArgs(swr.Value));
-            }
-        }
-    }
-
-    double lastFwdPower;
-    bool isReady;
-
-    private void HandleDataFromRadio(ISerialPort_old serialPort, CancellationTokenSource tokenSource)
-    { 
-        logger.LogInformation("Waiting for data...");
-
-        while (!tokenSource.IsCancellationRequested)
-        {
-            /*if (!serialPort.TryReadTo("\r", out var radioOutput, TimeSpan.FromSeconds(10)))
-            {
-                if (TryDetectTait(serialPort, out _))
-                {
-                    logger.LogInformation("Radio is still there");
-                    continue;
-                }
-                else
-                {
-                    logger.LogWarning("Radio has gone away");
-                    tokenSource.Cancel();
-                    return;
-                }
-            }*/
-
-            string radioOutput = "";
-
-            if (string.IsNullOrWhiteSpace(radioOutput))
-            {
-                logger.LogWarning("Radio returned nothing");
-                continue;
-            }
-
-            while (radioOutput.StartsWith('.'))
-            {
-                radioOutput = radioOutput[1..];
-                isReady = true;
-            }
-
-            if (radioOutput.StartsWith('j') && CcdiCommand.TryParse(radioOutput, out var queryResponseCommand))
-            {
-                var queryResponse = queryResponseCommand.AsQueryResponse();
-                queryResponse.RadioOutput = radioOutput;
-                lock (queryResponses)
-                {
-                    queryResponses.Add(queryResponse);
-                }
-            }
-            else if (radioOutput.StartsWith('p') && CcdiCommand.TryParse(radioOutput, out var progressCommand))
-            {
-                var progressMessage = progressCommand.AsProgressMessage();
-                progressMessage.RadioOutput = radioOutput;
-                SetState(progressMessage.ProgressType);
-            }
-            else if (radioOutput.StartsWith('e'))
-            {
-                if (CcdiCommand.TryParse(radioOutput, out var errorCommand))
-                {
-                    var errorMessage = errorCommand.AsErrorMessage();
-                    if (errorMessage.Category == ErrorCategory.TransactionError)
-                    {
-                        logger.LogWarning("Radio returned transaction error {transactionError}",
-                            errorMessage.TransactionError.ToString());
+                        RawRssiUpdated?.Invoke(this, new RssiEventArgs(rssi!.Value));
+                        rssi = null;
                     }
                     else
                     {
-                        logger.LogWarning("Radio returned system error: {radioOutput}", radioOutput);
+                        logger.LogWarning("Failed to get RSSI in 1s");
                     }
                 }
-                else
+            }
+            else if (state == RadioState.Transmitting)
+            {
+                double? fwd = null;
+                double? rev = null;
+
+                lock (commandLock)
                 {
-                    logger.LogWarning("Radio returned unknown error {error}", radioOutput);
+                    SendCommand(QueryCommands.Cctm_ForwardPower);
+                    if (SpinWait.SpinUntil(() => fwdPower != null, TimeSpan.FromSeconds(1)))
+                    {
+                        fwd = fwdPower;
+                        fwdPower = null;
+                    }
+                    else
+                    {
+                        logger.LogWarning("Failed to get fwd power in 1s");
+                    }
+                }
+
+                lock (commandLock)
+                {
+                    SendCommand(QueryCommands.Cctm_ReversePower);
+                    if (SpinWait.SpinUntil(() => revPower != null, TimeSpan.FromSeconds(1)))
+                    {
+                        rev = revPower;
+                        revPower = null;
+                    }
+                    else
+                    {
+                        logger.LogWarning("Failed to get rev power in 1s");
+                    }
+                }
+
+                if (fwd != null && rev != null && transmittingFor.ElapsedMilliseconds > 300 && state == RadioState.Transmitting)
+                {
+                    var vswr = GetVswr(fwd.Value, rev.Value);
+                    if (vswr.HasValue && !double.IsNaN(vswr.Value) && vswr > 0)
+                    {
+                        VswrChanged?.Invoke(this, new VswrEventArgs(vswr.Value));
+                    }
                 }
             }
-            else
-            {
-                logger.LogError("Unexpected radio output: {radioOutput}", radioOutput);
-            }
         }
     }
 
-    private void SetState(ProgressType type)
-    {
-        var oldState = State;
-
-        if (type == ProgressType.PttMicActivated)
-        {
-            State = RadioState.Transmitting;
-        }
-        else if (type == ProgressType.PttMicDeactivated)
-        {
-            State = RadioState.ReceivingNoise;
-        }
-        else if (type == ProgressType.ReceiverBusy)
-        {
-            State = RadioState.ReceivingSignal;
-        }
-        else if (type == ProgressType.ReceiverNotBusy)
-        {
-            State = RadioState.ReceivingNoise;
-        }
-
-        if (oldState != State)
-        {
-            StateChanged?.Invoke(this, new StateChangedEventArgs(oldState, State));
-        }
-    }
-
-    // raw rssi 064
-    // averaged rssi 063
-    // forward power 318
-    // reverse power 319
-    // pa temperature 047
-
-    /// <summary>
-    /// Get the VSWR from the forward and reverse voltage.
-    /// </summary>
-    /// <returns></returns>
-    private static double? GetVswr(double forward, double reverse)
-    {
-        double top = forward + reverse;
-        double bottom = forward - reverse;
-        double result = top / bottom;
-        return result;
-    }
+    private readonly Stopwatch transmittingFor = new();
 }
 
 public enum RadioState
@@ -629,35 +411,25 @@ public enum RadioState
     ReceivingNoise, ReceivingSignal, Transmitting
 }
 
-internal static class ExtensionMethods
-{
-    public static string ToHex(this int b)
-    {
-        var hex = b.ToString("X").ToLower();
-        if (hex.Length == 1)
-        {
-            hex = "0" + hex;
-        }
-        return hex;
-    }
 
-    public static bool TryReadChar(this ISerialPort serialPort, TimeSpan timeout, out char value)
-    {
-        var oldTimeout = serialPort.ReadTimeout;
-        serialPort.ReadTimeout = timeout;
-        try
-        {
-            value = (char)serialPort.ReadByte();
-            return true; 
-        }
-        catch (TimeoutException)
-        {
-            value = default;
-            return false;
-        }
-        finally
-        {
-            serialPort.ReadTimeout = oldTimeout;
-        }
-    }
+public class StateChangedEventArgs(RadioState from, RadioState to) : EventArgs
+{
+    public RadioState From { get; } = from;
+    public RadioState To { get; } = to;
+}
+
+public class RssiEventArgs(double rssi) : EventArgs
+{
+    public double Rssi { get; } = rssi;
+}
+
+public class VswrEventArgs(double vswr) : EventArgs
+{
+    public double Vswr { get; } = vswr;
+}
+
+public class PaTempEventArgs(int? readTempC, int readAdcValue) : EventArgs
+{
+    public int? TempC { get; } = readTempC;
+    public int AdcValue { get; } = readAdcValue;
 }

@@ -203,33 +203,6 @@ public enum ErrorCategory
     TransactionError = 0, SystemError = 1
 }
 
-public class ProgressMessageEventArgs(ProgressMessage message) : EventArgs
-{
-    public ProgressMessage ProgressMessage { get; } = message;
-}
-
-public class StateChangedEventArgs(RadioState from, RadioState to) : EventArgs
-{
-    public RadioState From { get; } = from;
-    public RadioState To { get; } = to;
-}
-
-public class RssiEventArgs(double rssi) : EventArgs
-{
-    public double Rssi { get; } = rssi;
-}
-
-public class VswrEventArgs(double vswr) : EventArgs
-{
-    public double Vswr { get; } = vswr;
-}
-
-public class PaTempEventArgs(int? readTempC, int readAdcValue) : EventArgs
-{
-    public int? TempC { get; } = readTempC;
-    public int AdcValue { get; } = readAdcValue;
-}
-
 public enum ProgressType
 {
     CallAnswered = 0x00,
