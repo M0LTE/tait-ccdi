@@ -1,5 +1,4 @@
 ﻿using harness;
-using Microsoft.Extensions.Logging;
 using System.IO.Ports;
 using tait_ccdi;
 
@@ -15,13 +14,13 @@ var sp = new SerialPort("COM2", 28800);
 sp.Open();
 var radio = new TaitRadio(new RealSerialPortWrapper(sp), logger);
 
-object lockObj = new();
+object cursorLock = new();
 Console.CursorVisible = false;
 Console.WriteLine();
 
 radio.StateChanged += (sender, e) =>
 {
-    lock (lockObj)
+    lock (cursorLock)
     {
         var (Left, Top) = Console.GetCursorPosition();
         Console.SetCursorPosition(Console.WindowWidth - 45, 0);
@@ -32,7 +31,7 @@ radio.StateChanged += (sender, e) =>
 
 radio.RawRssiUpdated += (sender, e) =>
 {
-    lock (lockObj)
+    lock (cursorLock)
     {
         var (Left, Top) = Console.GetCursorPosition();
         Console.SetCursorPosition(Console.WindowWidth - 16, 0);
@@ -43,7 +42,7 @@ radio.RawRssiUpdated += (sender, e) =>
 
 radio.VswrChanged += (sender, e) =>
 {
-    lock (lockObj)
+    lock (cursorLock)
     {
         var (Left, Top) = Console.GetCursorPosition();
         Console.SetCursorPosition(Console.WindowWidth - 33, 0);
@@ -54,7 +53,7 @@ radio.VswrChanged += (sender, e) =>
 
 radio.PaTempRead += (sender, e) =>
 {
-    lock (lockObj)
+    lock (cursorLock)
     {
         var (Left, Top) = Console.GetCursorPosition();
         Console.SetCursorPosition(Console.WindowWidth - 60, 0);
