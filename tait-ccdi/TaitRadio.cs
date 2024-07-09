@@ -110,7 +110,7 @@ public class TaitRadio
         dataGathererThread.IsBackground = true;
         dataGathererThread.Start();
 
-        using Timer timer = new(SendGetTemperatureQuery, null, 0, 60000);
+        using Timer timer = new(SendGetTemperatureQuery, null, 2000, 10000);
 
         while (true)
         {
@@ -334,16 +334,16 @@ public class TaitRadio
 
             if (SpinWait.SpinUntil(() => paTempResponses.Count == 2, TimeSpan.FromMilliseconds(100)))
             {
-                ea = new PaTempEventArgs(paTempResponses[0], paTempResponses[1]);
+                ea = new PaTempEventArgs(paTempResponses[1]);
             }
             else if (paTempResponses.Count == 1)
             {
-                ea = new PaTempEventArgs(null, paTempResponses[0]);
+                ea = new PaTempEventArgs(paTempResponses[0]);
             }
 
             paTempResponses.Clear();
 
-            if (ea != null && (ea.TempC == null || ea.TempC <= 100))
+            if (ea != null && ea.TempC <= 100)
             {
                 PaTempRead?.Invoke(this, ea);
             }
@@ -440,8 +440,37 @@ public class VswrEventArgs(double vswr) : EventArgs
     public double Vswr { get; } = vswr;
 }
 
-public class PaTempEventArgs(int? readTempC, int readAdcValue) : EventArgs
+public class PaTempEventArgs(int readAdcValue) : EventArgs
 {
-    public int? TempC { get; } = readTempC;
-    public int AdcValue { get; } = readAdcValue;
+    public double TempC
+    {
+        get
+        {
+            /*if (readTempC.HasValue)
+            {
+                return readTempC.Value;
+            }
+            else
+            {*/
+                return CalculateDegrees(readAdcValue);
+            //}
+        }
+    }
+
+    private static double CalculateDegrees(int milliVolts)
+    {
+        // set of actual values read from a TM8110:
+        // 28, 468
+        // 29, 467
+        // 30, 464
+        // 33, 458
+        // 37, 450
+        // 37, 448
+        // 36, 452
+        // 34, 455
+        
+        // m and c values from a linear regression of the above data
+        var result = -0.463 * milliVolts + 244.81;
+        return Math.Round(result, 1, MidpointRounding.AwayFromZero);
+    }
 }

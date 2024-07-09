@@ -59,6 +59,7 @@ radio.PaTempRead += (sender, e) =>
         Console.SetCursorPosition(Console.WindowWidth - 60, 0);
         Console.Write($"Temp: {e.TempC,3:0.0}°C");
         Console.SetCursorPosition(Left, Top);
+        //logger.LogInformation(e.TempC + " " + e.AdcValue);
     }
 };
 
