@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using System.Diagnostics;
+using System.IO.Ports;
 
 namespace tait_ccdi;
 
@@ -49,7 +50,7 @@ public class TaitRadio
     {
         SpinWait.SpinUntil(() => ready);
         ready = false;
-        serialPort.WriteLine(command);
+        serialPort.Write(command + '\r');
     }
 
     static void DebugSerialPortOutputToConsole(ISerialPort serialPort)
@@ -88,7 +89,7 @@ public class TaitRadio
         while (true)
         {
             serialPort.ReadExisting();
-            serialPort.WriteLine(QueryCommands.ModelAndCcdiVersion);
+            serialPort.Write(QueryCommands.ModelAndCcdiVersion + '\r');
             var response = ReadResponseTypeAndResponse('m', TimeSpan.FromSeconds(1));
             if (string.IsNullOrWhiteSpace(response))
             {
@@ -413,6 +414,14 @@ public class TaitRadio
                 }
             }
         }
+    }
+
+    public static TaitRadio Create(string radioPort, int radioBaud, ILogger logger)
+    {
+        var serialPort = new SerialPort(radioPort, radioBaud);
+        var wrapper = new RealSerialPortWrapper(serialPort);
+        TaitRadio radio = new(wrapper, logger);
+        return radio;
     }
 
     private readonly Stopwatch transmittingFor = new();

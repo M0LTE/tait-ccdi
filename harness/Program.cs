@@ -1,5 +1,4 @@
 ﻿using harness;
-using System.IO.Ports;
 using tait_ccdi;
 
 Dictionary<RadioState, string> displayStates = new() {
@@ -10,9 +9,7 @@ Dictionary<RadioState, string> displayStates = new() {
 
 var logger = ConsoleWritelineLogger.Instance;
 
-var sp = new SerialPort("COM2", 28800);
-sp.Open();
-var radio = new TaitRadio(new RealSerialPortWrapper(sp), logger);
+var radio = TaitRadio.Create("COM2", 28800, logger);
 
 object cursorLock = new();
 Console.CursorVisible = false;
