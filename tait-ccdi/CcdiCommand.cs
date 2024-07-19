@@ -12,6 +12,8 @@ public record struct CcdiCommand
     public string? Parameters { get; set; }
     public required string Checksum { get; set; }
 
+    public override string ToString() => $"{Ident}{Size:00}{Parameters}{Checksum}";
+
     public static bool TryParse(string command, out CcdiCommand ccdiCommand)
     {
         if (command.Length < 5)
@@ -50,6 +52,61 @@ public record struct CcdiCommand
     }
 
     private static string Hex(int size) => Convert.ToHexString(new[] { (byte)size });
+
+    public static CcdiCommand SetCtcss(RxTx ab, decimal? hz)
+    {
+        var dhz = hz == null ? 0 : hz.Value * 10;
+        var dHzstr = dhz.ToString("0000");
+
+        if (hz > 300)
+        {
+            throw new ArgumentOutOfRangeException(nameof(hz), "Invalid CTCSS frequency " + hz);
+        }
+
+        var cmd = FromParts((char)ab, dHzstr);
+        
+        return cmd;
+    }
+
+    public static CcdiCommand SetVolume(byte level)
+    {
+        var cmd = FromParts('J', level.ToString("000"));
+        return cmd;
+    }
+
+    public static CcdiCommand SetPower(Power power)
+    {
+        var cmd = FromParts('P', ((int)power).ToString());
+        return cmd;
+    }
+
+    public static CcdiCommand SetBandwidth(ChannelBandwidth bandwidth)
+    {
+        var cmd = FromParts('H', ((int)bandwidth).ToString());
+        return cmd;
+    }
+
+    public static CcdiCommand SetMonitor(bool monitor)
+    {
+        var cmd = FromParts('M', (monitor ? 'D' : 'E').ToString());
+        return cmd;
+    }
+
+    private static CcdiCommand SetFreq(char rt, int hz)
+    {
+        if (hz < 66000000 || hz > 520000000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(hz), "Invalid frequency " + hz);
+        }
+
+        var freqStr = hz.ToString();
+        var cmd = FromParts(rt, freqStr);
+        return cmd;
+    }
+
+    public static CcdiCommand SetRxFreq(int hz) => SetFreq('R', hz);
+
+    public static CcdiCommand SetTxFreq(int hz) => SetFreq('T', hz);
 
     public const int Terminator = 0x0d;
 }

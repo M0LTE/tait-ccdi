@@ -53,6 +53,12 @@ public class TaitRadio
         serialPort.Write(command + '\r');
     }
 
+    private void SendCommand(CcdiCommand ccdiCommand)
+    {
+        var command = ccdiCommand.ToString();
+        SendCommand(command);
+    }
+
     static void DebugSerialPortOutputToConsole(ISerialPort serialPort)
     {
         Console.ForegroundColor = ConsoleColor.Cyan;
@@ -77,7 +83,7 @@ public class TaitRadio
             else
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                
+
                 Console.Write("{" + b.ToHex() + "}");
                 Console.ResetColor();
             }
@@ -424,7 +430,62 @@ public class TaitRadio
         return radio;
     }
 
+    /// <summary>
+    /// Radio will return M01R00
+    /// </summary>
+    private void EnterCcrMode() => SendCommand("f0200D8");
+
+    /// <summary>
+    /// Radio will reboot
+    /// </summary>
+    private void ExitCcrMode() => SendCommand("E005B");
+
+    /// <summary>
+    /// Set the transmit and receive frequency of the Tait.
+    /// </summary>
+    public void SetFrequency(int hz)
+    {
+        ExecuteInCcrMode(() =>
+        {
+            SendCommand(CcdiCommand.SetRxFreq(hz));
+            SendCommand(CcdiCommand.SetTxFreq(hz));
+        });
+    }
+
+    private void ExecuteInCcrMode(Action action)
+    {
+        lock (commandLock)
+        {
+            EnterCcrMode();
+            action();
+            // ExitCcrMode(); // radio will reboot :(
+        }
+    }
+
+    public void SetBandwidth(ChannelBandwidth bandwidth) => ExecuteInCcrMode(() => SendCommand(CcdiCommand.SetBandwidth(bandwidth)));
+
+    public void SetPower(Power power) => ExecuteInCcrMode(() => SendCommand(CcdiCommand.SetPower(power)));
+    public void SetReceiveCtcss(decimal hz) => ExecuteInCcrMode(() => SendCommand(CcdiCommand.SetCtcss(RxTx.Rx, hz)));
+    public void SetTransmitCtcss(decimal hz) => ExecuteInCcrMode(() => SendCommand(CcdiCommand.SetCtcss(RxTx.Tx, hz)));
+    public void SetVolume(byte level) => ExecuteInCcrMode(() => SendCommand(CcdiCommand.SetVolume(level)));
+    public void SetMonitor(bool monitor) => ExecuteInCcrMode(() => SendCommand(CcdiCommand.SetMonitor(monitor)));
+
     private readonly Stopwatch transmittingFor = new();
+}
+
+public enum RxTx
+{
+    Rx = 'A', Tx = 'B'
+}
+
+public enum Power
+{
+    VeryLow = 1, Low, Medium, High
+}
+
+public enum ChannelBandwidth
+{
+    Narrow = 1, Medium, Wide
 }
 
 public enum RadioState

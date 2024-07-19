@@ -176,4 +176,52 @@ public class CcdiCommandTests
         progressMessage.Para1.Should().BeNull();
         progressMessage.Para2.Should().BeNull();
     }
+
+    [Fact]
+    public void Volume0() => CcdiCommand.SetVolume(0).ToString().Should().Be("J03000C3");
+
+    [Fact]
+    public void Volume104() => CcdiCommand.SetVolume(104).ToString().Should().Be("J03104BE");
+
+    [Fact]
+    public void SetCtcssRx67() => CcdiCommand.SetCtcss(RxTx.Rx, 67).ToString().Should().Be("A0406708E");
+
+    [Fact]
+    public void SetCtcssRx0() => CcdiCommand.SetCtcss(RxTx.Rx, 0).ToString().Should().Be("A0400009B");
+
+    [Fact]
+    public void SetCtcssRx0Null() => CcdiCommand.SetCtcss(RxTx.Rx, null).ToString().Should().Be("A0400009B");
+
+    [Fact]
+    public void SetCtcssTx67() => CcdiCommand.SetCtcss(RxTx.Tx, 67).ToString().Should().Be("B0406708D");
+
+    [Fact]
+    public void SetCtcssTx0() => CcdiCommand.SetCtcss(RxTx.Tx, 0).ToString().Should().Be("B0400009A");
+
+    [Fact]
+    public void SetCtcssTx0Null() => CcdiCommand.SetCtcss(RxTx.Tx, null).ToString().Should().Be("B0400009A");
+
+    [Fact]
+    public void PowerVeryLow() => CcdiCommand.SetPower(Power.VeryLow).ToString().Should().Be("P0111E");
+
+    [Fact]
+    public void PowerHigh() => CcdiCommand.SetPower(Power.High).ToString().Should().Be("P0141B");
+
+    [Fact]
+    public void BandwidthWide() => CcdiCommand.SetBandwidth(ChannelBandwidth.Wide).ToString().Should().Be("H01324");
+
+    [Fact]
+    public void BandwidthNarrow() => CcdiCommand.SetBandwidth(ChannelBandwidth.Narrow).ToString().Should().Be("H01126");
+
+    [Fact]
+    public void SetRxFreq() => CcdiCommand.SetRxFreq(453200000).ToString().Should().Be("R0945320000087");
+
+    [Fact]
+    public void SetTxFreq() => CcdiCommand.SetTxFreq(453200000).ToString().Should().Be("T0945320000085");
+
+    [Fact]
+    public void MonitorOn() => CcdiCommand.SetMonitor(true).ToString().Should().Be("M01D0E");
+
+    [Fact]
+    public void MonitorOff() => CcdiCommand.SetMonitor(false).ToString().Should().Be("M01E0D");
 }

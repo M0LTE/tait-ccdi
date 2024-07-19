@@ -60,4 +60,6 @@ radio.PaTempRead += (sender, e) =>
     }
 };
 
+radio.SetFrequency(144950000);
+
 Thread.CurrentThread.Join();
