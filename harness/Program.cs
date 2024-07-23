@@ -1,4 +1,5 @@
 ﻿using harness;
+using Microsoft.Extensions.Logging;
 using tait_ccdi;
 
 Dictionary<RadioState, string> displayStates = new() {
@@ -12,7 +13,6 @@ var logger = ConsoleWritelineLogger.Instance;
 var radio = TaitRadio.Create("COM2", 28800, logger);
 
 object cursorLock = new();
-Console.CursorVisible = false;
 Console.WriteLine();
 
 radio.StateChanged += (sender, e) =>
@@ -60,6 +60,60 @@ radio.PaTempRead += (sender, e) =>
     }
 };
 
-radio.SetFrequency(144950000);
+while (true)
+{
+    Console.Write(" >");
+    var cmd = Console.ReadLine();
 
-Thread.CurrentThread.Join();
+    try
+    {
+        if (cmd == "exit")
+        {
+            break;
+        }
+        else if (cmd == "ccr")
+        {
+            radio.EnterCcrMode();
+        }
+        else if (cmd == "exitccr")
+        {
+            radio.ExitCcrMode();
+        }
+        else if (cmd!.StartsWith("txf "))
+        {
+            var freq = int.Parse(cmd[4..]);
+            radio.SetTxFrequency(freq);
+        }
+        else if (cmd.StartsWith("rxf "))
+        {
+            var freq = int.Parse(cmd[4..]);
+            radio.SetRxFrequency(freq);
+        }
+        else if (cmd.StartsWith("ctcss "))
+        {
+            var ctcss = decimal.Parse(cmd.Substring(6));
+            radio.SetTxCtcss(ctcss);
+            radio.SetRxCtcss(ctcss);
+        }
+        else if (cmd.StartsWith("mon "))
+        {
+            radio.SetMonitor(cmd[4..] == "on");
+        }
+        else if (cmd.StartsWith("vol "))
+        {
+            radio.SetVolume((byte)int.Parse(cmd[4..]));
+        }
+        else if (cmd.StartsWith("bw "))
+        {
+            radio.SetBandwidth(Enum.Parse<ChannelBandwidth>(cmd[3..]));
+        }
+        else if (cmd.StartsWith("pwr "))
+        {
+            radio.SetPower(Enum.Parse<Power>(cmd[3..]));
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex.Message);
+    }
+}

@@ -2,23 +2,25 @@
 
 internal static class Extensions
 {
-    public static char[] ReadChars(this ISerialPort serialPort, int count)
+    public static char[] ReadPrintableChars(this ISerialPort serialPort, int count)
     {
         var result = new char[count];
         for (int i = 0; i < count; i++)
         {
             char c = (char)serialPort.ReadByte();
-            if (c >= 32 && c <= 126 || c == '\r')
+            if (c.IsPrintable() || c == '\r')
             {
                 result[i] = c;
             }
             else
             {
-                throw new Exception("Invalid character: " + c + " (" + (int)c + ")");
+                throw new Exception("Unprintable character: " + c + " " + (int)c);
             }
         }
         return result;
     }
+
+    public static bool IsPrintable(this char c) => c >= 32 && c <= 126;
 
     public static bool TryReadChar(this ISerialPort serialPort, TimeSpan timeout, out char value)
     {
