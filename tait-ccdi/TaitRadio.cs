@@ -51,7 +51,7 @@ public class TaitRadio
     {
         if (!IsCcrMode)
         { 
-            SpinWait.SpinUntil(() => ready);
+            SpinWait.SpinUntil(() => ready || disconnectSignalled);
             ready = false;
         }
         
@@ -99,9 +99,11 @@ public class TaitRadio
         }
     }
 
+    private bool disconnectSignalled;
+
     private void WaitForRadio()
     {
-        while (true)
+        while (!disconnectSignalled)
         {
             serialPort.ReadExisting();
             serialPort.Write(QueryCommands.ModelAndCcdiVersion + '\r');
@@ -492,7 +494,7 @@ public class TaitRadio
 
     private void SendGetTemperatureQuery(object? _)
     {
-        if (IsCcrMode)
+        if (disconnectSignalled || IsCcrMode)
         {
             return;
         }
@@ -527,7 +529,7 @@ public class TaitRadio
 
     private void GatherDataBasedOnState()
     {
-        while (true)
+        while (!disconnectSignalled)
         {
             if (IsCcrMode)
             {
@@ -540,8 +542,12 @@ public class TaitRadio
                 lock (commandLock)
                 {
                     SendCommand(QueryCommands.Cctm_RawRssi);
-                    if (SpinWait.SpinUntil(() => rssi != null, TimeSpan.FromSeconds(1)))
+                    if (SpinWait.SpinUntil(() => rssi != null || disconnectSignalled, TimeSpan.FromSeconds(1)))
                     {
+                        if (disconnectSignalled)
+                        {
+                            return;
+                        }
                         RawRssiUpdated?.Invoke(this, new RssiEventArgs(rssi!.Value));
                         rssi = null;
                     }
@@ -562,7 +568,7 @@ public class TaitRadio
                 lock (commandLock)
                 {
                     SendCommand(QueryCommands.Cctm_ForwardPower);
-                    if (SpinWait.SpinUntil(() => fwdPower != null, TimeSpan.FromSeconds(1)))
+                    if (SpinWait.SpinUntil(() => fwdPower != null || disconnectSignalled, TimeSpan.FromSeconds(1)))
                     {
                         fwd = fwdPower;
                         fwdPower = null;
@@ -579,7 +585,7 @@ public class TaitRadio
                 lock (commandLock)
                 {
                     SendCommand(QueryCommands.Cctm_ReversePower);
-                    if (SpinWait.SpinUntil(() => revPower != null, TimeSpan.FromSeconds(1)))
+                    if (SpinWait.SpinUntil(() => revPower != null || disconnectSignalled, TimeSpan.FromSeconds(1)))
                     {
                         rev = revPower;
                         revPower = null;
@@ -596,7 +602,7 @@ public class TaitRadio
                 if (fwd != null && rev != null && transmittingFor.ElapsedMilliseconds > 300 && state == RadioState.Transmitting)
                 {
                     var vswr = GetVswr(fwd.Value, rev.Value);
-                    if (vswr.HasValue && !double.IsNaN(vswr.Value) && vswr > 0)
+                    if (!disconnectSignalled && vswr.HasValue && !double.IsNaN(vswr.Value) && vswr > 0)
                     {
                         VswrChanged?.Invoke(this, new VswrEventArgs(vswr.Value));
                     }
@@ -611,6 +617,13 @@ public class TaitRadio
         var wrapper = new RealSerialPortWrapper(serialPort);
         TaitRadio radio = new(wrapper, logger);
         return radio;
+    }
+
+    public void Disconnect()
+    {
+        disconnectSignalled = true;
+        serialPort.Close();
+        serialPort.Dispose();
     }
 
     /// <summary>

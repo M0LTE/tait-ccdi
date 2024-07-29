@@ -69,6 +69,7 @@ while (true)
     {
         if (cmd == "exit")
         {
+            radio.Disconnect();
             break;
         }
         else if (cmd == "ccr")

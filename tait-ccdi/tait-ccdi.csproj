@@ -3,17 +3,19 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <PackageId>m0lte.tait-ccdi</PackageId>
-    <Version>0.0.4</Version>
+    <Version>0.0.6</Version>
     <Authors>Tom Fanning</Authors>
     <RootNamespace>tait_ccdi</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.1" />
     <PackageReference Include="System.IO.Ports" Version="8.0.0" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>
