@@ -36,6 +36,11 @@ internal static class Extensions
             value = default;
             return false;
         }
+        catch (InvalidOperationException)
+        {
+            value = default;
+            return false;
+        }
         finally
         {
             serialPort.ReadTimeout = oldTimeout;

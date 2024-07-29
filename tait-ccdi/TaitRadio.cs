@@ -105,39 +105,49 @@ public class TaitRadio
     {
         while (!disconnectSignalled)
         {
-            serialPort.ReadExisting();
-            serialPort.Write(QueryCommands.ModelAndCcdiVersion + '\r');
-            var response = ReadResponseTypeAndResponse('m', TimeSpan.FromSeconds(1));
-            if (string.IsNullOrWhiteSpace(response))
+            try
             {
-                logger.LogInformation("Looking for radio...");
-            }
-            else
-            {
-                logger.LogInformation("Found radio in CCDI mode; model/version: {response}", response);
-                break;
-            }
-
-            serialPort.ReadExisting();
-            serialPort.Write("Q01PFE\r");
-            var pingResponse = ReadResponseTypeAndResponse('Q', TimeSpan.FromSeconds(1));
-
-            if (pingResponse != null && pingResponse.StartsWith("Q"))
-            {
-                IsCcrMode = true;
-                if (pingResponse == "QD0A")
+                serialPort.ReadExisting();
+                serialPort.Write(QueryCommands.ModelAndCcdiVersion + '\r');
+                var response = ReadResponseTypeAndResponse('m', TimeSpan.FromSeconds(1));
+                if (string.IsNullOrWhiteSpace(response))
                 {
-                    logger.LogInformation("Found radio in CCR mode without config (receive frequency needs setting)");
-                    break;
-                }
-                else if (pingResponse == "QPFE")
-                {
-                    logger.LogInformation("Found radio in CCR mode with required config");
-                    break;
+                    logger.LogInformation("Looking for radio...");
                 }
                 else
                 {
-                    logger.LogWarning("Unrecognised ping response {pingResponse}", pingResponse);
+                    logger.LogInformation("Found radio in CCDI mode; model/version: {response}", response);
+                    break;
+                }
+
+                serialPort.ReadExisting();
+                serialPort.Write("Q01PFE\r");
+                var pingResponse = ReadResponseTypeAndResponse('Q', TimeSpan.FromSeconds(1));
+
+                if (pingResponse != null && pingResponse.StartsWith("Q"))
+                {
+                    IsCcrMode = true;
+                    if (pingResponse == "QD0A")
+                    {
+                        logger.LogInformation("Found radio in CCR mode without config (receive frequency needs setting)");
+                        break;
+                    }
+                    else if (pingResponse == "QPFE")
+                    {
+                        logger.LogInformation("Found radio in CCR mode with required config");
+                        break;
+                    }
+                    else
+                    {
+                        logger.LogWarning("Unrecognised ping response {pingResponse}", pingResponse);
+                    }
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                if (disconnectSignalled)
+                {
+                    return;
                 }
             }
         }
@@ -153,7 +163,7 @@ public class TaitRadio
 
         using Timer timer = new(SendGetTemperatureQuery, null, 2000, 10000);
 
-        while (true)
+        while (!disconnectSignalled)
         {
             char readChar;
 
