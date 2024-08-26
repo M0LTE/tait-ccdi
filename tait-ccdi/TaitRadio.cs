@@ -681,6 +681,16 @@ public class TaitRadio
     private readonly Stopwatch transmittingFor = new();
 
     public bool IsCcrMode { get; private set; }
+
+    public void GoToChannel(int channel, string? zone = null)
+    {
+        if (IsCcrMode)
+        {
+            throw new InvalidOperationException("Radio must not be in CCR mode to do this");
+        }
+
+        SendCommand(CcdiCommand.GoToChannel(channel, zone));
+    }
 }
 
 public enum RxTx

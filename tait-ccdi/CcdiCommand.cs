@@ -1,4 +1,11 @@
-﻿namespace tait_ccdi;
+﻿using System.ComponentModel.DataAnnotations;
+using System;
+using System.Net.NetworkInformation;
+using System.Reflection.Metadata;
+using System.Threading.Channels;
+using static System.Runtime.InteropServices.JavaScript.JSType;
+
+namespace tait_ccdi;
 
 // see https://wiki.oarc.uk/_media/radios:tm8100-protocol-manual.pdf
 
@@ -14,8 +21,10 @@ public record struct CcdiCommand
 
     public override string ToString() => $"{Ident}{Size:00}{Parameters}{Checksum}";
 
-    public static bool TryParse(string command, out CcdiCommand ccdiCommand)
+    public static bool TryParse(string cmd, out CcdiCommand ccdiCommand)
     {
+        var command = cmd.Replace(" ", "");
+
         if (command.Length < 5)
         {
             ccdiCommand = default;
@@ -37,8 +46,9 @@ public record struct CcdiCommand
         return true;
     }
 
-    public static CcdiCommand FromParts(char ident, string parameters)
+    public static CcdiCommand FromParts(char ident, string para)
     {
+        var parameters = para.Replace(" ", "");
         var size = parameters.Length;
         var messageWithoutChecksum = $"{ident}{Hex(size)}{parameters}";
         var sum = CcdiChecksum.Calculate(messageWithoutChecksum);
@@ -107,6 +117,38 @@ public record struct CcdiCommand
     public static CcdiCommand SetRxFreq(int hz) => SetFreq('R', hz);
 
     public static CcdiCommand SetTxFreq(int hz) => SetFreq('T', hz);
+
+    /// <summary>
+    /// The GO_TO_CHANNEL command tells the radio to change to another
+    /// conventional mode channel.The specified channel can be assigned to a
+    /// scan/vote group in the radio.A trunked radio must change to a conventional
+    /// channel before executing this command.
+    /// </summary>
+    /// <param name="channel">The new channel number between 0 and 9999. This must
+    /// be a valid channel for the radio.</param>
+    /// <param name="zone">A two character string representing the new zone. When [ZONE] is omitted,
+    /// the radio stays in the current zone. Optional for TM8200, not applicable for TM8100</param>
+    /// <returns></returns>
+    /// <exception cref="ArgumentException">Zone is not null or two characters</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Channel is out of allowed range</exception>
+    public static CcdiCommand GoToChannel(int channel, string? zone = null)
+    {
+        if (zone != null && zone.Length != 2)
+        {
+            throw new ArgumentException("Zone must be 2 characters", nameof(zone));
+        }
+
+        if (channel < 1 || channel > 9999)
+        {
+            throw new ArgumentOutOfRangeException(nameof(channel), "Invalid channel " + channel);
+        }
+
+        var formattedChannel = zone == null ? channel.ToString() : channel.ToString("0000");
+
+        var cmd = FromParts('g', (zone ?? "") + formattedChannel);
+
+        return cmd;
+    }
 
     public const int Terminator = 0x0d;
 }
@@ -340,12 +382,19 @@ public static class CcdiCommandExtensions
         }
         else if (result.ProgressType == ProgressType.UserInitiatedChannelChange)
         {
-            // 0 is single channel, 1 is scan/vote group of channels, 2 is a channel captured within a scan/vote group,
-            // 3 is a temporary channel, e.g. one used for GPS, 9 is the channel is not available or invalid
-            result.Para1 = ccdiCommand.Parameters!.Substring(ccdiCommand.Parameters!.Length - 7, 1);
-            // [PARA2] is a fixed length field of 6-digits which indicate zone (2 digits) and the channel
-            // or scan/ vote group ID(4 digits).
-            result.Para2 = ccdiCommand.Parameters!.Substring(ccdiCommand.Parameters!.Length - 6, 6);
+            if (ccdiCommand.Parameters!.Length == 4)
+            {
+                result.Para1 = ccdiCommand.Parameters![2..];
+            }
+            else
+            {
+                // 0 is single channel, 1 is scan/vote group of channels, 2 is a channel captured within a scan/vote group,
+                // 3 is a temporary channel, e.g. one used for GPS, 9 is the channel is not available or invalid
+                result.Para1 = ccdiCommand.Parameters!.Substring(ccdiCommand.Parameters!.Length - 7, 1);
+                // [PARA2] is a fixed length field of 6-digits which indicate zone (2 digits) and the channel
+                // or scan/ vote group ID(4 digits).
+                result.Para2 = ccdiCommand.Parameters!.Substring(ccdiCommand.Parameters!.Length - 6, 6);
+            }
         }
         else if (result.ProgressType == ProgressType.TdmaChannelId)
         {

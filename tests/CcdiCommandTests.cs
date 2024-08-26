@@ -122,6 +122,42 @@ public class CcdiCommandTests
     }
 
     [Fact]
+    public void PType21Short1()
+    {
+        CcdiCommand.TryParse("p 04 21 01 68", out var command).Should().BeTrue();
+        var progressMessage = command.AsProgressMessage();
+        progressMessage.ProgressType.Should().Be(ProgressType.UserInitiatedChannelChange);
+        progressMessage.Checksum.Should().Be("68");
+        progressMessage.Size.Should().Be(4);
+        int.Parse(progressMessage.Para1).Should().Be(1);
+        progressMessage.Para2.Should().BeNull();
+    }
+
+    [Fact]
+    public void PType21Short2()
+    {
+        CcdiCommand.TryParse("p 04 21 02 67", out var command).Should().BeTrue();
+        var progressMessage = command.AsProgressMessage();
+        progressMessage.ProgressType.Should().Be(ProgressType.UserInitiatedChannelChange);
+        progressMessage.Checksum.Should().Be("67");
+        progressMessage.Size.Should().Be(4);
+        int.Parse(progressMessage.Para1).Should().Be(2);
+        progressMessage.Para2.Should().BeNull();
+    }
+
+    [Fact]
+    public void PType21Short12()
+    {
+        var command = CcdiCommand.FromParts('p', "21 12");
+        var progressMessage = command.AsProgressMessage();
+        progressMessage.ProgressType.Should().Be(ProgressType.UserInitiatedChannelChange);
+        progressMessage.Checksum.Should().Be("66");
+        progressMessage.Size.Should().Be(4);
+        int.Parse(progressMessage.Para1).Should().Be(12);
+        progressMessage.Para2.Should().BeNull();
+    }
+
+    [Fact]
     public void PType22()
     {
         var command = CcdiCommand.FromParts('p', "22" + "EF" + "0D");
@@ -224,4 +260,23 @@ public class CcdiCommandTests
 
     [Fact]
     public void MonitorOff() => CcdiCommand.SetMonitor(false).ToString().Should().Be("M01E0D");
+
+    [Theory]
+    [InlineData(null, 23, "g0223D2")]
+    [InlineData(null, 1499, "g0414995E")]
+    [InlineData("01", 12, "g060100120F")]
+    public void GoToChannelAndZone(string? zone, int channel, string command)
+    {
+        CcdiCommand.GoToChannel(channel, zone).ToString().Should().Be(command);
+    }
+
+    [Fact]
+    public void GoToChannelParses()
+    {
+        CcdiCommand.TryParse("g0223D2", out var command).Should().BeTrue();
+        command.Ident.Should().Be('g');
+        command.Size.Should().Be(2);
+        command.Parameters.Should().Be("23");
+        command.Checksum.Should().Be("D2");
+    }
 }

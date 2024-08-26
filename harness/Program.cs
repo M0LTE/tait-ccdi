@@ -10,7 +10,7 @@ Dictionary<RadioState, string> displayStates = new() {
 
 var logger = ConsoleWritelineLogger.Instance;
 
-var radio = TaitRadio.Create("COM2", 28800, logger);
+var radio = TaitRadio.Create("COM6", 28800, logger);
 
 object cursorLock = new();
 Console.WriteLine();
@@ -111,6 +111,10 @@ while (true)
         else if (cmd.StartsWith("pwr "))
         {
             radio.SetPower(Enum.Parse<Power>(cmd[3..]));
+        }
+        else if (cmd.StartsWith("g "))
+        {
+            radio.GoToChannel(int.Parse(cmd[2..]));
         }
     }
     catch (Exception ex)
