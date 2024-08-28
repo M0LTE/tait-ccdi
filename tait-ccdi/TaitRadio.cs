@@ -233,7 +233,7 @@ public class TaitRadio
                         else if (command.Ident == 'p')
                         {
                             var progress = command.AsProgressMessage();
-                            HandleProgress(progress.ProgressType);
+                            HandleProgress(progress);
                         }
                         else if (command.Ident == 'e')
                         {
@@ -381,10 +381,10 @@ public class TaitRadio
         logger.LogWarning($"error: {error.Category}");
     }
 
-    private void HandleProgress(ProgressType progressType)
+    private void HandleProgress(ProgressMessage progressMessage)
     {
         var oldState = state;
-
+        var progressType = progressMessage.ProgressType;
         if (progressType == ProgressType.PttMicActivated)
         {
             state = RadioState.Transmitting;
@@ -408,6 +408,10 @@ public class TaitRadio
         else if (progressType == ProgressType.ReceiverNotBusy)
         {
             state = RadioState.ReceivingNoise;
+        }
+        else if (progressType == ProgressType.UserInitiatedChannelChange)
+        {
+            logger.LogInformation($"Channel is {progressMessage.Para1}");
         }
 
         if (oldState != state)
@@ -690,6 +694,23 @@ public class TaitRadio
         }
 
         SendCommand(CcdiCommand.GoToChannel(channel, zone));
+    }
+
+    public int GetCurrentChannel()
+    {
+        SendFunctionCommand(0, 5, "2");
+
+        return 0;
+    }
+
+    private void SendFunctionCommand(int function, int? subfunction, string? qualifier)
+    {
+        if (IsCcrMode)
+        {
+            throw new InvalidOperationException("Radio must be not in CCR mode to do this");
+        }
+
+        SendCommand(CcdiCommand.Function(function, subfunction, qualifier));
     }
 }
 

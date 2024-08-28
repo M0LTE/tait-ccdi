@@ -150,6 +150,21 @@ public record struct CcdiCommand
         return cmd;
     }
 
+    public static CcdiCommand Function(int function, int? subfunction, string? qualifier)
+    {
+        if (function < 0 || function > 9)
+        {
+            throw new ArgumentOutOfRangeException(nameof(function), "Invalid function " + function);
+        }
+
+        if (subfunction != null && (subfunction < 0 || subfunction > 99))
+        {
+            throw new ArgumentOutOfRangeException(nameof(subfunction), "Invalid subfunction " + subfunction);
+        }
+
+        return FromParts('f', $"{function}{subfunction}{qualifier}");
+    }
+
     public const int Terminator = 0x0d;
 }
 

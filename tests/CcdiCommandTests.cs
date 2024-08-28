@@ -279,4 +279,14 @@ public class CcdiCommandTests
         command.Parameters.Should().Be("23");
         command.Checksum.Should().Be("D2");
     }
+
+    [Theory]
+    [InlineData(9, null, "1", "f0291CE")]
+    [InlineData(5, null, "0", "f0250D3")]
+    [InlineData(0, 2, "25", "f0402256D")]
+    [InlineData(0, 5, "1", "f03051A1")]
+    [InlineData(0, 5, "2", "f03052A0")]
+    public void Functions(int command, int? subCommand, string? qualifier, string expected) 
+        => CcdiCommand.Function(command, subCommand, qualifier).ToString().Should().Be(expected);
+
 }
