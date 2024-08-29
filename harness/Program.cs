@@ -112,13 +112,20 @@ while (true)
         {
             radio.SetPower(Enum.Parse<Power>(cmd[3..]));
         }
-        else if (cmd.StartsWith("g "))
+        else if (cmd.StartsWith("chan"))
         {
-            radio.GoToChannel(int.Parse(cmd[2..]));
-        }
-        else if (cmd == "gc")
-        {
-            logger.LogInformation("Channel " + radio.GetCurrentChannel());
+            if (cmd.StartsWith("chan "))
+            {
+                var c = int.Parse(cmd[5..]);
+                if (radio.GoToChannel(c))
+                {
+                    logger.LogInformation("Channel changed to {channel}", c);
+                }
+            }
+            else
+            {
+                logger.LogInformation("Channel is " + radio.GetCurrentChannel());
+            }
         }
     }
     catch (Exception ex)

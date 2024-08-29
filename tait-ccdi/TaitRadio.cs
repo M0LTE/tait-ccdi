@@ -196,11 +196,11 @@ public class TaitRadio
                 else
                 {
                     var message = readChar + messageBody;
-                    /*if (!CcdiChecksum.Validate(msg))
+                    if (!CcdiChecksum.Validate(message))
                     {
-                        logger.LogError(msg + " has invalid checksum");
+                        logger.LogError(message + " has invalid checksum");
                         continue;
-                    }*/
+                    }
 
                     if (CcdiCommand.TryParse(message, out var command))
                     {
@@ -411,7 +411,7 @@ public class TaitRadio
         }
         else if (progressType == ProgressType.UserInitiatedChannelChange)
         {
-            logger.LogInformation($"Channel is {progressMessage.Para1}");
+            channelUpdate = int.Parse(progressMessage.Para1);
         }
 
         if (oldState != state)
@@ -556,7 +556,7 @@ public class TaitRadio
                 lock (commandLock)
                 {
                     SendCommand(QueryCommands.Cctm_RawRssi);
-                    if (SpinWait.SpinUntil(() => rssi != null || disconnectSignalled, TimeSpan.FromSeconds(1)))
+                    if (SpinWait.SpinUntil(() => rssi != null || disconnectSignalled, TimeSpan.FromSeconds(0.1)))
                     {
                         if (disconnectSignalled)
                         {
@@ -569,7 +569,7 @@ public class TaitRadio
                     {
                         if (!IsCcrMode)
                         {
-                            logger.LogWarning("Failed to get RSSI in 1s");
+                            logger.LogDebug("Failed to get RSSI");
                         }
                     }
                 }
@@ -686,21 +686,44 @@ public class TaitRadio
 
     public bool IsCcrMode { get; private set; }
 
-    public void GoToChannel(int channel, string? zone = null)
+    public bool GoToChannel(int channel, string? zone = null)
     {
         if (IsCcrMode)
         {
             throw new InvalidOperationException("Radio must not be in CCR mode to do this");
         }
 
-        SendCommand(CcdiCommand.GoToChannel(channel, zone));
+        lock (commandLock)
+        {
+            SendCommand(CcdiCommand.GoToChannel(channel, zone));
+
+            if (!SpinWait.SpinUntil(() => GetCurrentChannel() == channel, TimeSpan.FromSeconds(1)))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
+
+    private int? channelUpdate;
 
     public int GetCurrentChannel()
     {
-        SendFunctionCommand(0, 5, "2");
+        lock (commandLock)
+        {
+            SendFunctionCommand(0, 5, "2");
+            
+            if (SpinWait.SpinUntil(() => channelUpdate != null || disconnectSignalled, TimeSpan.FromSeconds(0.1)))
+            {
+                int result = channelUpdate!.Value;
+                channelUpdate = null;
+                return result;
+            }
+        }
 
-        return 0;
+        logger.LogError("Radio failed to return channel");
+        return -1;
     }
 
     private void SendFunctionCommand(int function, int? subfunction, string? qualifier)
@@ -710,6 +733,7 @@ public class TaitRadio
             throw new InvalidOperationException("Radio must be not in CCR mode to do this");
         }
 
+        
         SendCommand(CcdiCommand.Function(function, subfunction, qualifier));
     }
 }

@@ -262,12 +262,15 @@ public class CcdiCommandTests
     public void MonitorOff() => CcdiCommand.SetMonitor(false).ToString().Should().Be("M01E0D");
 
     [Theory]
-    [InlineData(null, 23, "g0223D2")]
-    [InlineData(null, 1499, "g0414995E")]
-    [InlineData("01", 12, "g060100120F")]
+    [InlineData(null, 1, "g 01 1 07")]
+    [InlineData(null, 2, "g 01 2 06")]
+    [InlineData(null, 23, "g 02 23 D2")]
+    [InlineData(null, 1499, "g 04 1499 5E")]
+    [InlineData(null, 499, "g 03 499 90")]
+    [InlineData("01", 12, "g 06 01 0012 0F")]
     public void GoToChannelAndZone(string? zone, int channel, string command)
     {
-        CcdiCommand.GoToChannel(channel, zone).ToString().Should().Be(command);
+        CcdiCommand.GoToChannel(channel, zone).ToString().Should().Be(command.Replace(" ", ""));
     }
 
     [Fact]
@@ -281,12 +284,12 @@ public class CcdiCommandTests
     }
 
     [Theory]
-    [InlineData(9, null, "1", "f0291CE")]
-    [InlineData(5, null, "0", "f0250D3")]
-    [InlineData(0, 2, "25", "f0402256D")]
-    [InlineData(0, 5, "1", "f03051A1")]
-    [InlineData(0, 5, "2", "f03052A0")]
+    [InlineData(9, null, "1", "f 02 9 1 CE")]
+    [InlineData(5, null, "0", "f 02 5 0 D3")]
+    [InlineData(0, 2, "25", "f 04 0 2 25 6D")]
+    [InlineData(0, 5, "1", "f 03 0 5 1 A1")]
+    [InlineData(0, 5, "2", "f 03 0 5 2 A0")]
     public void Functions(int command, int? subCommand, string? qualifier, string expected) 
-        => CcdiCommand.Function(command, subCommand, qualifier).ToString().Should().Be(expected);
+        => CcdiCommand.Function(command, subCommand, qualifier).ToString().Should().Be(expected.Replace(" ", ""));
 
 }
