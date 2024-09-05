@@ -16,7 +16,7 @@ public class TaitRadio
     public event EventHandler<PaTempEventArgs>? PaTempRead;
 
     private readonly ISerialPort serialPort;
-    private readonly ILogger logger;
+    private readonly ILogger? logger;
     private readonly object commandLock = new();
     private readonly List<int> paTempResponses = [];
 
@@ -25,7 +25,7 @@ public class TaitRadio
     bool ready;
     private RadioState state;
 
-    public TaitRadio(ISerialPort serialPort, ILogger logger)
+    public TaitRadio(ISerialPort serialPort, ILogger? logger)
     {
         this.serialPort = serialPort;
         this.logger = logger;
@@ -33,6 +33,18 @@ public class TaitRadio
         var serialListenerThread = new Thread(SerialPortListener);
         serialListenerThread.IsBackground = true;
         serialListenerThread.Start();
+    }
+
+    public TaitRadio(string radioComPort, int radioComBaud, ILogger? logger = null)
+        : this(CreateSerialPort(radioComPort, radioComBaud), logger)
+    {
+    }
+
+    private static ISerialPort CreateSerialPort(string radioPort, int radioBaud)
+    {
+        var serialPort = new SerialPort(radioPort, radioBaud);
+        var wrapper = new RealSerialPortWrapper(serialPort);
+        return wrapper;
     }
 
     /// <summary>
@@ -59,7 +71,7 @@ public class TaitRadio
 
         if (IsCcrMode)
         {
-            logger.LogInformation("Sent command: {command}", command);
+            logger?.LogInformation("Sent command: {command}", command);
         }
     }
 
@@ -112,11 +124,11 @@ public class TaitRadio
                 var response = ReadResponseTypeAndResponse('m', TimeSpan.FromSeconds(1));
                 if (string.IsNullOrWhiteSpace(response))
                 {
-                    logger.LogInformation("Looking for radio...");
+                    logger?.LogInformation("Looking for radio...");
                 }
                 else
                 {
-                    logger.LogInformation("Found radio in CCDI mode; model/version: {response}", response);
+                    logger?.LogInformation("Found radio in CCDI mode; model/version: {response}", response);
                     break;
                 }
 
@@ -129,17 +141,17 @@ public class TaitRadio
                     IsCcrMode = true;
                     if (pingResponse == "QD0A")
                     {
-                        logger.LogInformation("Found radio in CCR mode without config (receive frequency needs setting)");
+                        logger?.LogInformation("Found radio in CCR mode without config (receive frequency needs setting)");
                         break;
                     }
                     else if (pingResponse == "QPFE")
                     {
-                        logger.LogInformation("Found radio in CCR mode with required config");
+                        logger?.LogInformation("Found radio in CCR mode with required config");
                         break;
                     }
                     else
                     {
-                        logger.LogWarning("Unrecognised ping response {pingResponse}", pingResponse);
+                        logger?.LogWarning("Unrecognised ping response {pingResponse}", pingResponse);
                     }
                 }
             }
@@ -175,7 +187,7 @@ public class TaitRadio
             {
                 if (!serialPort.TryReadChar(TimeSpan.FromSeconds(10), out readChar))
                 {
-                    logger.LogInformation("No data read for 10s");
+                    logger?.LogInformation("No data read for 10s");
                     continue;
                 }
             }
@@ -191,14 +203,14 @@ public class TaitRadio
                 var messageBody = ReadResponse(TimeSpan.FromSeconds(1));
                 if (messageBody == null)
                 {
-                    logger.LogError("Failed to read message {message} in 5s", readChar);
+                    logger?.LogError("Failed to read message {message} in 5s", readChar);
                 }
                 else
                 {
                     var message = readChar + messageBody;
                     if (!CcdiChecksum.Validate(message))
                     {
-                        logger.LogError(message + " has invalid checksum");
+                        logger?.LogError(message + " has invalid checksum");
                         continue;
                     }
 
@@ -227,7 +239,7 @@ public class TaitRadio
                             }
                             else
                             {
-                                logger.LogInformation($"query response: command:{response.Command} data:{response.Data}");
+                                logger?.LogInformation($"query response: command:{response.Command} data:{response.Data}");
                             }
                         }
                         else if (command.Ident == 'p')
@@ -238,63 +250,63 @@ public class TaitRadio
                         else if (command.Ident == 'e')
                         {
                             var error = command.AsErrorMessage();
-                            HandleError(error);
+                            logger?.LogWarning($"error: {error.Category}");
                         }
                         else if (command.Ident == 'M' && command.Parameters == "R") // M 01 R 00
                         {
                             IsCcrMode = true;
-                            logger.LogInformation("Radio has entered CCR mode ({message})", message);
+                            logger?.LogInformation("Radio has entered CCR mode ({message})", message);
                         }
                         else if (command.Ident == '+')
                         {
                             if (!CcdiChecksum.Validate(message))
                             {
-                                logger.LogWarning("Invalid checksum in {message}", message);
+                                logger?.LogWarning("Invalid checksum in {message}", message);
                             }
 
                             if (command.Parameters == "E")
                             {
-                                logger.LogInformation("Rebooting");
+                                logger?.LogInformation("Rebooting");
                             }
                             else if (command.Parameters == "R")
                             {
-                                logger.LogInformation("Receive frequency set");
+                                logger?.LogInformation("Receive frequency set");
                             }
                             else if (command.Parameters == "T")
                             {
-                                logger.LogInformation("Transmit frequency set");
+                                logger?.LogInformation("Transmit frequency set");
                             }
                             else if (command.Parameters == "A")
                             {
-                                logger.LogInformation("CTCSS set for receive");
+                                logger?.LogInformation("CTCSS set for receive");
                             }
                             else if (command.Parameters == "B")
                             {
-                                logger.LogInformation("CTCSS set for transmit");
+                                logger?.LogInformation("CTCSS set for transmit");
                             }
                             else if (command.Parameters == "M")
                             {
-                                logger.LogInformation("Monitor set");
+                                logger?.LogInformation("Monitor set");
                             }
                             else if (command.Parameters == "J")
                             {
-                                logger.LogInformation("Volume set");
+                                logger?.LogInformation("Volume set");
                             }
                             else if (command.Parameters == "H")
                             {
-                                logger.LogInformation("Bandwidth set");
+                                logger?.LogInformation("Bandwidth set");
                             }
                             else if (command.Parameters == "P")
                             {
-                                logger.LogInformation("Power set");
+                                logger?.LogInformation("Power set");
                             }
                             else if (command.Parameters == "Q")
                             {
-                                //logger.LogInformation("Q"); // unknown response to ping
+                                //logger?.LogInformation("Q"); // unknown response to ping
                             }
                             else
                             {
-                                logger.LogWarning("Unhandled CCR response: {message}", message);
+                                logger?.LogWarning("Unhandled CCR response: {message}", message);
 
                                 if (Debugger.IsAttached)
                                 {
@@ -306,31 +318,31 @@ public class TaitRadio
                         {
                             if (command.Parameters == "02C")
                             {
-                                logger.LogInformation("Radio has entered CCR mode ({message})", message);
+                                logger?.LogInformation("Radio has entered CCR mode ({message})", message);
                             }
                             else if (command.Parameters == "03R")
                             {
-                                logger.LogInformation("Invalid receive frequency");
+                                logger?.LogInformation("Invalid receive frequency");
                             }
                             else if (command.Parameters == "03T")
                             {
-                                logger.LogInformation("Invalid transmit frequency");
+                                logger?.LogInformation("Invalid transmit frequency");
                             }
                             else if (command.Parameters == "03A")
                             {
-                                logger.LogInformation("Invalid CTCSS for receive");
+                                logger?.LogInformation("Invalid CTCSS for receive");
                             }
                             else if (command.Parameters == "03B")
                             {
-                                logger.LogInformation("Invalid CTCSS for transmit");
+                                logger?.LogInformation("Invalid CTCSS for transmit");
                             }
                             else if (command.Parameters == "01Q")
                             {
-                                logger.LogInformation("Unknown CCR failure {parameters}}", command.Parameters);
+                                logger?.LogInformation("Unknown CCR failure {parameters}}", command.Parameters);
                             }
                             else
                             {
-                                logger.LogWarning("Unhandled CCR error: {message}", message);
+                                logger?.LogWarning("Unhandled CCR error: {message}", message);
 
                                 if (Debugger.IsAttached)
                                 {
@@ -340,12 +352,12 @@ public class TaitRadio
                         }
                         else
                         {
-                            logger.LogWarning("Unhandled command: {message}", message);
+                            logger?.LogWarning("Unhandled command: {message}", message);
                         }
                     }
                     else
                     {
-                        logger.LogWarning("Could not parse {message} as CcdiCommand", message);
+                        logger?.LogWarning("Could not parse {message} as CcdiCommand", message);
                     }
                 }
             }
@@ -357,12 +369,12 @@ public class TaitRadio
                 {
                     if (serialPort.ReadByte() == 0xfe && serialPort.ReadByte() == 0x0d)
                     {
-                        logger.LogInformation("Radio has booted");
+                        logger?.LogInformation("Radio has booted");
                     }
                 }
                 catch (Exception)
                 {
-                    logger.LogWarning("Lost track of what radio is doing");
+                    logger?.LogWarning("Lost track of what radio is doing");
                 }
                 finally
                 {
@@ -371,14 +383,9 @@ public class TaitRadio
             }
             else
             {
-                logger.LogWarning("Unexpected character read from radio: {readChar}", readChar.IsPrintable() ? readChar : ("0x" + ((int)readChar).ToHex()));
+                logger?.LogWarning("Unexpected character read from radio: {readChar}", readChar.IsPrintable() ? readChar : ("0x" + ((int)readChar).ToHex()));
             }
         }
-    }
-
-    private void HandleError(ErrorMessage error)
-    {
-        logger.LogWarning($"error: {error.Category}");
     }
 
     private void HandleProgress(ProgressMessage progressMessage)
@@ -454,7 +461,7 @@ public class TaitRadio
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error reading response");
+            logger?.LogError(ex, "Error reading response");
             return null;
         }
         finally
@@ -497,7 +504,7 @@ public class TaitRadio
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error reading response");
+            logger?.LogError(ex, "Error reading response");
             return null;
         }
         finally
@@ -569,7 +576,7 @@ public class TaitRadio
                     {
                         if (!IsCcrMode)
                         {
-                            logger.LogDebug("Failed to get RSSI");
+                            logger?.LogDebug("Failed to get RSSI");
                         }
                     }
                 }
@@ -591,7 +598,7 @@ public class TaitRadio
                     {
                         if (!IsCcrMode)
                         {
-                            logger.LogWarning("Failed to get fwd power in 1s");
+                            logger?.LogWarning("Failed to get fwd power in 1s");
                         }
                     }
                 }
@@ -608,7 +615,7 @@ public class TaitRadio
                     {
                         if (!IsCcrMode)
                         {
-                            logger.LogWarning("Failed to get rev power in 1s");
+                            logger?.LogWarning("Failed to get rev power in 1s");
                         }
                     }
                 }
@@ -623,14 +630,6 @@ public class TaitRadio
                 }
             }
         }
-    }
-
-    public static TaitRadio Create(string radioPort, int radioBaud, ILogger logger)
-    {
-        var serialPort = new SerialPort(radioPort, radioBaud);
-        var wrapper = new RealSerialPortWrapper(serialPort);
-        TaitRadio radio = new(wrapper, logger);
-        return radio;
     }
 
     public void Disconnect()
@@ -722,7 +721,7 @@ public class TaitRadio
             }
         }
 
-        logger.LogError("Radio failed to return channel");
+        logger?.LogError("Radio failed to return channel");
         return -1;
     }
 
@@ -732,7 +731,6 @@ public class TaitRadio
         {
             throw new InvalidOperationException("Radio must be not in CCR mode to do this");
         }
-
         
         SendCommand(CcdiCommand.Function(function, subfunction, qualifier));
     }

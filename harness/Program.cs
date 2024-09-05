@@ -10,7 +10,7 @@ Dictionary<RadioState, string> displayStates = new() {
 
 var logger = ConsoleWritelineLogger.Instance;
 
-var radio = TaitRadio.Create("COM6", 28800, logger);
+var radio = new TaitRadio("COM6", 28800, logger);
 
 object cursorLock = new();
 Console.WriteLine();
