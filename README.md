@@ -17,7 +17,7 @@ On the Data tab of the radio programming application, ensure the radio has Data 
 ## Usage
 
 ```csharp
-var radio = TaitRadio.Open("COM2", 28800, logger);
+var radio = new TaitRadio("COM2", 28800);
 
 radio.StateChanged += (sender, e) =>
 {
