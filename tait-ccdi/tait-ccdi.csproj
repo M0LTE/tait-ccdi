@@ -3,7 +3,7 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <PackageId>m0lte.tait-ccdi</PackageId>
-    <Version>0.4.0</Version>
+    <Version>0.5.0</Version>
     <Authors>Tom Fanning</Authors>
     <RootNamespace>tait_ccdi</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>

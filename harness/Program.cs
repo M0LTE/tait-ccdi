@@ -13,10 +13,10 @@ var logger = ConsoleWritelineLogger.Instance;
 var radio = new TaitRadio("COM6", 28800, logger);
 
 CancellationTokenSource cts = new(5000);
+var success = radio.GoToChannel(2, cts.Token);
 radio.GetCurrentChannel(cts.Token);
 
 object cursorLock = new();
-Console.WriteLine();
 
 radio.StateChanged += (sender, e) =>
 {

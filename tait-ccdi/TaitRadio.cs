@@ -687,7 +687,8 @@ public class TaitRadio
 
     public bool IsCcrMode { get; private set; }
 
-    public bool GoToChannel(int channel, string? zone = null)
+    public bool GoToChannel(int channel, string? zone = null) => GoToChannel(channel, CancellationToken.None, zone);
+    public bool GoToChannel(int channel, CancellationToken cancellationToken, string? zone = null)
     {
         if (IsCcrMode)
         {
@@ -696,15 +697,15 @@ public class TaitRadio
 
         lock (commandLock)
         {
-            SendCommand(CcdiCommand.GoToChannel(channel, zone));
+            SendCommand(CcdiCommand.GoToChannel(channel, zone), cancellationToken);
 
-            if (!SpinWait.SpinUntil(() => GetCurrentChannel() == channel, TimeSpan.FromSeconds(1)))
+            if (!SpinWait.SpinUntil(() => cancellationToken.IsCancellationRequested || GetCurrentChannel(cancellationToken) == channel, TimeSpan.FromSeconds(1)))
             {
                 return false;
             }
         }
 
-        return true;
+        return !cancellationToken.IsCancellationRequested;
     }
 
     private int? channelUpdate;
