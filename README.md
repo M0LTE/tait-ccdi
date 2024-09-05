@@ -2,6 +2,8 @@
 
 This is a .NET 8 library for the Tait Communications Common Channel Digital Interface (CCDI) protocol. It was built and tested with the Tait TM8100 transceiver, but may work with other Tait 8000-series radios that support the CCDI protocol.
 
+If you find this useful, please feel free to [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Y8Y8KFHA0), but no pressure of course.
+
 ## Installation
 
 ```
