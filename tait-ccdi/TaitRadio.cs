@@ -59,11 +59,12 @@ public class TaitRadio
         return result;
     }
 
-    private void SendCommand(string command)
+    private void SendCommand(string command) => SendCommand(command, CancellationToken.None);
+    private void SendCommand(string command, CancellationToken cancellationToken)
     {
         if (!IsCcrMode)
         { 
-            SpinWait.SpinUntil(() => ready || disconnectSignalled);
+            SpinWait.SpinUntil(() => ready || disconnectSignalled || cancellationToken.IsCancellationRequested);
             ready = false;
         }
         
@@ -75,10 +76,11 @@ public class TaitRadio
         }
     }
 
-    private void SendCommand(CcdiCommand ccdiCommand)
+    private void SendCommand(CcdiCommand ccdiCommand) => SendCommand(ccdiCommand, CancellationToken.None);
+    private void SendCommand(CcdiCommand ccdiCommand, CancellationToken cancellationToken)
     {
         var command = ccdiCommand.ToString();
-        SendCommand(command);
+        SendCommand(command, cancellationToken);
     }
 
     static void DebugSerialPortOutputToConsole(ISerialPort serialPort)
@@ -707,11 +709,12 @@ public class TaitRadio
 
     private int? channelUpdate;
 
-    public int GetCurrentChannel()
+    public int GetCurrentChannel() => GetCurrentChannel(CancellationToken.None);
+    public int GetCurrentChannel(CancellationToken cancellationToken)
     {
         lock (commandLock)
         {
-            SendFunctionCommand(0, 5, "2");
+            SendFunctionCommand(0, 5, "2", cancellationToken);
             
             if (SpinWait.SpinUntil(() => channelUpdate != null || disconnectSignalled, TimeSpan.FromSeconds(0.1)))
             {
@@ -725,14 +728,14 @@ public class TaitRadio
         return -1;
     }
 
-    private void SendFunctionCommand(int function, int? subfunction, string? qualifier)
+    private void SendFunctionCommand(int function, int? subfunction, string? qualifier, CancellationToken cancellationToken)
     {
         if (IsCcrMode)
         {
             throw new InvalidOperationException("Radio must be not in CCR mode to do this");
         }
         
-        SendCommand(CcdiCommand.Function(function, subfunction, qualifier));
+        SendCommand(CcdiCommand.Function(function, subfunction, qualifier), cancellationToken);
     }
 }
 
