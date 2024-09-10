@@ -138,7 +138,7 @@ public record struct CcdiCommand
             throw new ArgumentException("Zone must be 2 characters", nameof(zone));
         }
 
-        if (channel < 1 || channel > 9999)
+        if (channel < 0 || channel > 9999)
         {
             throw new ArgumentOutOfRangeException(nameof(channel), "Invalid channel " + channel);
         }
